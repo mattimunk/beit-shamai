@@ -4,6 +4,8 @@
  *   GET  /                         the web app (dist/index.html, built by `bun run build`)
  *   GET  /health                   status and data freshness per source
  *   GET  /api/geocode?q=...        address search (GovMap)
+ *   POST /api/cases/:caseId/documents  upload one document (multipart: file, kind)
+ *   GET  /api/cases/:caseId/documents  list a case's documents
  *   POST /api/valuate              { subject, date? }                  → ValuationResult
  *   POST /api/listings/import      ImportRequest (licensed feeds)      → ImportResult      [admin]
  *   POST /api/jobs/:job            run a job now: deals | match | gtfs | cbs | renewal | backup [admin]
@@ -14,7 +16,7 @@
  */
 import { existsSync } from "node:fs";
 import type { Subject } from "../src/engine/types";
-import { valuate } from "../src/engine/valuation";
+import { valuate, type ValuationFacts } from "../src/engine/valuation";
 import { lastRun, openDb, pairsNear } from "./db";
 import { importFeed, type ImportRequest } from "./ledger";
 import { backup, rematch, runJob, syncCbs, syncDeals, syncGtfs, syncRenewal } from "./jobs";
@@ -22,6 +24,7 @@ import { SqliteProvider } from "./sqliteProvider";
 import { loadSources, type SourcesConfig } from "./config";
 import { geocode } from "./connectors/geocode";
 import { startScheduler } from "./scheduler";
+import { listDocuments, storeDocument } from "./documents";
 
 /** How old each source may get before /health reports it stale (hours). */
 const MAX_AGE_H: Record<string, number> = { deals: 36, match: 36, gtfs: 8 * 24, renewal: 8 * 24, cbs: 40 * 24, backup: 36 };
@@ -74,11 +77,18 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         }
 
         if (url.pathname === "/api/valuate" && req.method === "POST") {
-          const body = (await req.json()) as { subject: Subject; date?: string };
+          const body = (await req.json()) as { subject: Subject; facts?: ValuationFacts; date?: string };
           if (!body?.subject?.location) return json({ error: "subject with location required" }, 400);
           const date = body.date ?? new Date().toISOString().slice(0, 10);
-          return json(await valuate(body.subject, provider, date));
+          return json(await valuate(body.subject, provider, date, body.facts ?? {}));
         }
+
+        const docRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/documents$/);
+        if (docRoute && req.method === "POST") {
+          const [body, status] = await storeDocument(db, docRoute[1]!, req);
+          return json(body, status);
+        }
+        if (docRoute && req.method === "GET") return json(listDocuments(db, docRoute[1]!));
 
         if (url.pathname.startsWith("/api/") && !isAdmin(req)) return json({ error: "unauthorised" }, 401);
 

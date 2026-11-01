@@ -22,6 +22,9 @@
 - [ ] Back-fill: historical adverts are needed for matching, so ask licensors for 2+ years of history
 - [ ] Real map base layer (GovMap / municipal GIS)
 - [ ] Coefficient calibration with 3–5 partner appraisers, per city
+- [x] Appraisal-format report (buyer estimate / realtor survey / appraiser draft) and document uploads feeding the valuation
+- [ ] Automatic extraction from uploaded documents (OCR + AI: registry extract, contracts, permits) with the user confirming the fields
+- [ ] Calibrate the typical gross-yield range per city for the income cross-check
 - [ ] Accounts and roles (buyer, realtor, partner appraiser, admin); saved properties and alerts
 - [ ] Appraiser review workspace and signed-appraisal tier
 

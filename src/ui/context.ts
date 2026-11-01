@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 import { fmt, STRINGS, type Lang } from "../i18n/strings";
 
-export type Role = "buyer" | "realtor";
+export type Role = "buyer" | "realtor" | "appraiser";
 
 export const LangContext = createContext<Lang>("he");
 

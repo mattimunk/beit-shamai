@@ -9,13 +9,15 @@ const he = {
   tagline: "אומדן שווי דיגיטלי לדירות מגורים",
   demoBanner: "נתוני הדגמה – עיר בדויה. אף עסקה, מודעה או פרויקט אינם אמיתיים.",
   lang: "English",
-  role: { buyer: "רוכש", realtor: "מתווך" },
+  role: { buyer: "רוכש", realtor: "מתווך", appraiser: "שמאי" },
   tabs: { valuation: "אומדן", report: "דו״ח" },
   print: "הדפסה / PDF",
   // titles by role (two-tier model)
   titleBuyer: "אומדן שווי ממוחשב",
   titleRealtor: "סקר מחירים",
-  titleSigned: "שומת מקרקעין",
+  titleSigned: "שומת מקרקעין – טיוטה לשמאי",
+  meta: { title: "פרטי הדו״ח", client: "מזמין", purpose: "מטרה", fileNo: "מס׳ תיק", visitDate: "תאריך ביקור", inspector: "מבקר", visitMethod: "אופן הביקור", appraiserName: "שם השמאי", licence: "מס׳ רישיון" },
+  metaDefaults: { client: "המזמין", purpose: "בחינת רכישת הנכס", visitMethod: "סריקת וידאו באפליקציה" },
   orderSigned: "הזמנת שומה חתומה ע״י שמאי מוסמך",
   orderNote: "בגרסה הבאה: התיק כולו יועבר לשמאי שותף לבדיקה וחתימה.",
   // input sections
@@ -184,6 +186,27 @@ const he = {
   blendExplain: "משקל המודעות גדל עם מספר הזוגות המאומתים באזור וכשהעסקאות ישנות יותר, ויורד כשיחסי עסקה/ביקוש מפוזרים. התקרה 40% – העסקאות תמיד דומיננטיות.",
   dealsOnlyValue: "לפי עסקאות בלבד",
   noCalibration: "אין די זוגות מודעה-עסקה באזור לתקנון מחירי ביקוש.",
+  docs: {
+    title: "מסמכים",
+    drop: "גררו לכאן קבצים או לחצו לבחירה (PDF, תמונות, Word)",
+    privacyDemo: "בהדגמה המסמכים נשארים בדפדפן בלבד ואינם נשלחים לשום מקום.",
+    privacyLive: "המסמכים נשמרים בשרת בישראל, בתיק הנכס בלבד.",
+    hint: "סמנו את סוג המסמך ומלאו את השדות העיקריים – הם משמשים בתחשיב ובדו״ח.",
+    kind: {
+      tabu: "נסח טאבו", purchase_contract: "חוזה רכישה", rental_contract: "חוזה שכירות", floor_plan: "תוכנית / תשריט",
+      building_permit: "היתר בנייה", form4: "טופס 4 / תעודת גמר", arnona: "חשבון ארנונה", condo_order: "צו / תשריט בית משותף",
+      engineer_report: "חוות דעת מהנדס / בדק בית", prior_appraisal: "שומה קודמת", photos: "תמונות", other: "אחר",
+    },
+    field: {
+      date: "תאריך", endDate: "תאריך סיום", rights: "סוג זכות", block: "גוש", parcel: "חלקה", subParcel: "תת-חלקה",
+      registeredArea: "שטח רשום (מ״ר)", mortgage: "משכנתא / שעבוד", caveat: "הערת אזהרה", notes: "הערות", price: "סכום (₪)",
+      area: "שטח (מ״ר)", monthlyRent: "שכ״ד חודשי (₪)", planType: "סוג תוכנית", permitNo: "מס׳ היתר",
+    },
+    planType: { permit: "תוכנית היתר", sale: "תוכנית מכר", condo: "תשריט בית משותף", other: "אחר" },
+    open: "פתיחה",
+    uploaded: "נשמר בשרת",
+    applied: "נתוני הנסח עודכנו בפרטי הנכס",
+  },
   addressSearch: "חיפוש כתובת",
   addressPlaceholder: "הקלידו כתובת, למשל: הרצל 10 חולון",
   addressError: "חיפוש הכתובת לא זמין כרגע.",
@@ -223,12 +246,14 @@ const en: Strings = {
   tagline: "Digital value estimates for Israeli homes",
   demoBanner: "Demo data – a fictional town. No deal, listing or project shown is real.",
   lang: "עברית",
-  role: { buyer: "Buyer", realtor: "Realtor" },
+  role: { buyer: "Buyer", realtor: "Realtor", appraiser: "Appraiser" },
   tabs: { valuation: "Estimate", report: "Report" },
   print: "Print / PDF",
   titleBuyer: "Automated value estimate (אומדן שווי ממוחשב)",
   titleRealtor: "Price survey (סקר מחירים)",
-  titleSigned: "Appraisal (שומת מקרקעין)",
+  titleSigned: "Appraisal draft for the appraiser",
+  meta: { title: "Report details", client: "Client", purpose: "Purpose", fileNo: "File no.", visitDate: "Visit date", inspector: "Inspector", visitMethod: "Visit method", appraiserName: "Appraiser name", licence: "Licence no." },
+  metaDefaults: { client: "the client", purpose: "considering the purchase of the property", visitMethod: "video scan in the app" },
   orderSigned: "Order an appraisal signed by a licensed appraiser",
   orderNote: "Next version: the full file goes to a partner appraiser for review and signature.",
   inputs: "Property details",
@@ -394,6 +419,27 @@ const en: Strings = {
   blendExplain: "The adverts' weight grows with the number of verified advert–sale pairs nearby and when the deals are older, and drops when sale/ask ratios are scattered. Capped at 40% so completed deals always dominate.",
   dealsOnlyValue: "Deals only",
   noCalibration: "Not enough advert–sale pairs nearby to calibrate asking prices.",
+  docs: {
+    title: "Documents",
+    drop: "Drop files here or click to choose (PDF, images, Word)",
+    privacyDemo: "In the demo, documents stay in your browser and are not sent anywhere.",
+    privacyLive: "Documents are stored on the server in Israel, in this property's file only.",
+    hint: "Set each document's type and fill in the key fields – they feed the calculation and the report.",
+    kind: {
+      tabu: "Land registry extract", purchase_contract: "Purchase contract", rental_contract: "Rental contract", floor_plan: "Floor plan",
+      building_permit: "Building permit", form4: "Form 4 / completion certificate", arnona: "Arnona bill", condo_order: "Condominium order / plan",
+      engineer_report: "Engineer / inspection report", prior_appraisal: "Previous appraisal", photos: "Photos", other: "Other",
+    },
+    field: {
+      date: "Date", endDate: "End date", rights: "Rights", block: "Block", parcel: "Parcel", subParcel: "Sub-parcel",
+      registeredArea: "Registered area (sqm)", mortgage: "Mortgage / charge", caveat: "Caveat (he'arat azhara)", notes: "Notes", price: "Amount (₪)",
+      area: "Area (sqm)", monthlyRent: "Monthly rent (₪)", planType: "Plan type", permitNo: "Permit no.",
+    },
+    planType: { permit: "Permit plan", sale: "Sale plan", condo: "Condominium plan", other: "Other" },
+    open: "Open",
+    uploaded: "Stored on server",
+    applied: "Registry details applied to the property",
+  },
   addressSearch: "Address search",
   addressPlaceholder: "Type an address, e.g. Herzl 10 Holon",
   addressError: "Address search is unavailable right now.",
@@ -440,7 +486,9 @@ export function fmt(lang: Lang) {
   const dist = (m: number) => (lang === "he" ? `${int.format(m)} מ׳` : `${int.format(m)} m`);
   const date = (iso: string) =>
     new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(iso));
+  const dnum = (iso: string) =>
+    new Intl.DateTimeFormat(lang === "he" ? "he-IL" : "en-GB", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(iso));
   const hebDate = (iso: string) =>
     new Intl.DateTimeFormat("he-IL-u-ca-hebrew", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(iso));
-  return { nis: (n: number) => nis.format(n), num: (n: number) => num.format(n), int: (n: number) => int.format(n), pct, dist, iso, date, hebDate };
+  return { nis: (n: number) => nis.format(n), num: (n: number) => num.format(n), int: (n: number) => int.format(n), pct, dist, iso, date, dnum, hebDate };
 }

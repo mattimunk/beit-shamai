@@ -30,6 +30,8 @@ export interface ValuationResult {
   /** Final blended price per equivalent sqm. */
   ppsqm: number | null;
   market: MarketContext;
+  /** Income cross-check from an uploaded rental contract (gross yield vs. typical range). */
+  income: { rentMonthly: number; grossYield: number; typicalRange: [number, number]; impliedLow: number; impliedHigh: number; withinRange: boolean } | null;
   transport: TransportResult;
   renewal: RenewalResult;
   warnings: Warning[];
@@ -45,10 +47,17 @@ export type Warning =
   | { key: "listings_disagree"; gap: number };
 
 /** Run a full valuation for a subject property against a data provider. */
+/** Facts taken from documents the user uploaded (see src/data/documents.ts). */
+export interface ValuationFacts {
+  rentMonthly?: number;
+  contractSales?: { date: string; price: number }[];
+}
+
 export async function valuate(
   subject: Subject,
   provider: DataProvider,
   valuationDate: string,
+  facts: ValuationFacts = {},
 ): Promise<ValuationResult> {
   const city = subject.address.city;
   const cfg: ValuationConfig = configFor(await provider.getCityConfig(city));
@@ -112,7 +121,37 @@ export async function valuate(
 
   // 4. Market context: asking prices, sale-to-ask gap, days on market, prior sales of this unit.
   const marketRadius = Math.max(comparables.radiusM, 1000);
-  const market = marketContext(subject.location, listings, valuationDate, marketRadius, model, unitHistory);
+  // Contract prices from uploaded purchase contracts join the unit's sale history.
+  const contractDeals = (facts.contractSales ?? [])
+    .filter((c) => !unitHistory.some((d) => d.date === c.date && Math.abs(d.price - c.price) < 1000))
+    .map((c, i) => ({
+      id: `contract-${i}`,
+      evidence: "completed_deal" as const,
+      source: "contract",
+      date: c.date,
+      price: c.price,
+      location: subject.location,
+      address: subject.address,
+      area: area.total,
+      rooms: subject.rooms,
+      floor: subject.floor,
+      newBuild: false,
+    }));
+  const market = marketContext(subject.location, listings, valuationDate, marketRadius, model, [...unitHistory, ...contractDeals]);
+
+  // Income cross-check (supporting only; the comparison approach sets the value).
+  const [yLo, yHi] = cfg.income.grossYieldRange;
+  const income =
+    facts.rentMonthly && value
+      ? {
+          rentMonthly: facts.rentMonthly,
+          grossYield: (facts.rentMonthly * 12) / value.point,
+          typicalRange: [yLo, yHi] as [number, number],
+          impliedLow: round((facts.rentMonthly * 12) / yHi, 10_000),
+          impliedHigh: round((facts.rentMonthly * 12) / yLo, 10_000),
+          withinRange: (facts.rentMonthly * 12) / value.point >= yLo && (facts.rentMonthly * 12) / value.point <= yHi,
+        }
+      : null;
 
   // 4. Transport today and planned.
   const plotKey = subject.parcel ? `${subject.parcel.block}-${subject.parcel.parcel}` : undefined;
@@ -158,6 +197,7 @@ export async function valuate(
     listingEvidence: listingEv,
     ppsqm,
     market,
+    income,
     transport,
     renewal,
     warnings,

@@ -9,7 +9,9 @@ import { LangContext, type Role } from "./context";
 import { PropertyForm } from "./Form";
 import { MapView } from "./MapView";
 import { Card, CompsTable, Disclaimer, AreaTable, BlendPanel, ListingsPanel, MarketPanel, RenewalPanel, TransportPanel, ValueCard, Warnings } from "./Panels";
-import { Report } from "./Report";
+import { ShumaReport, type ReportMeta } from "./ShumaReport";
+import { DocumentsPanel } from "./DocumentsPanel";
+import { applyRegistry, documentFacts, type DocumentRecord } from "../data/documents";
 
 type Tab = "valuation" | "report";
 
@@ -33,7 +35,27 @@ export function App() {
   const [live, setLive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [docs, setDocs] = useState<DocumentRecord[]>([]);
+  const caseId = useMemo(() => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`.replace(/\./g, "")), []);
   const t = STRINGS[lang];
+  const [meta, setMeta] = useState<ReportMeta>(() => ({
+    client: "",
+    purpose: "",
+    fileNo: `BS-${new Date().getFullYear()}-${caseId.slice(0, 6).toUpperCase()}`,
+    visitDate: "",
+    inspector: "",
+    visitMethod: "",
+    appraiserName: "",
+    licence: "",
+  }));
+  const facts = useMemo(() => documentFacts(docs), [docs]);
+  const effective = useMemo(() => applyRegistry(subject, docs), [subject, docs]);
+  const metaShown: ReportMeta = {
+    ...meta,
+    client: meta.client || t.metaDefaults.client,
+    purpose: meta.purpose || t.metaDefaults.purpose,
+    visitMethod: meta.visitDate ? meta.visitMethod || t.metaDefaults.visitMethod : "",
+  };
 
   useEffect(() => {
     detectServer().then((ok) => {
@@ -53,7 +75,8 @@ export function App() {
     const id = setTimeout(async () => {
       setBusy(true);
       try {
-        const r = live ? await valuateRemote(subject) : await valuate(subject, provider, DEMO_VALUATION_DATE);
+        const vf = { rentMonthly: facts.rentMonthly, contractSales: facts.contractSales };
+        const r = live ? await valuateRemote(effective, vf) : await valuate(effective, provider, DEMO_VALUATION_DATE, vf);
         if (!cancelled) {
           setResult(r);
           setError(null);
@@ -71,7 +94,7 @@ export function App() {
       cancelled = true;
       clearTimeout(id);
     };
-  }, [subject, provider, live]);
+  }, [effective, facts, provider, live]);
 
   return (
     <LangContext.Provider value={lang}>
@@ -93,7 +116,7 @@ export function App() {
           </nav>
           <div className="controls">
             <div className="segmented" role="radiogroup" aria-label="role">
-              {(["buyer", "realtor"] as Role[]).map((k) => (
+              {(["buyer", "realtor", "appraiser"] as Role[]).map((k) => (
                 <button key={k} role="radio" aria-checked={role === k} className={role === k ? "active" : ""} onClick={() => setRole(k)}>
                   {t.role[k]}
                 </button>
@@ -116,7 +139,8 @@ export function App() {
           <main className="layout">
             <aside className="inputs no-print">
               <h2>{t.inputs}</h2>
-              <PropertyForm subject={subject} onChange={setSubject} live={live} />
+              <PropertyForm subject={effective} onChange={setSubject} live={live} />
+              <DocumentsPanel docs={docs} onChange={setDocs} live={live} caseId={caseId} />
             </aside>
             <div className="results">
               {busy && !result && <div className="card muted">{t.loading}</div>}
@@ -148,7 +172,23 @@ export function App() {
             </div>
           </main>
         ) : (
-          <main className="report-wrap">{result && <Report r={result} subject={subject} role={role} />}</main>
+          <main className="report-wrap">
+            <aside className="meta-editor no-print">
+              <h3>{t.meta.title}</h3>
+              {(["client", "purpose", "fileNo", "visitDate", "inspector", "visitMethod", ...(role === "appraiser" ? ["appraiserName", "licence"] : [])] as (keyof ReportMeta)[]).map((k) => (
+                <label key={k} className="field">
+                  <span>{t.meta[k]}</span>
+                  <input
+                    type={k === "visitDate" ? "date" : "text"}
+                    value={meta[k]}
+                    placeholder={k === "client" ? t.metaDefaults.client : k === "purpose" ? t.metaDefaults.purpose : k === "visitMethod" ? t.metaDefaults.visitMethod : ""}
+                    onChange={(e) => setMeta({ ...meta, [k]: e.target.value })}
+                  />
+                </label>
+              ))}
+            </aside>
+            {result && <ShumaReport r={result} subject={effective} tier={role} meta={metaShown} docs={docs} facts={facts} />}
+          </main>
         )}
       </div>
     </LangContext.Provider>

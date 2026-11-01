@@ -12,7 +12,7 @@ const HALF = 1100; // metres shown either side of the property
 const SIZE = 520;
 
 export function MapView({ r, center, stops, listings }: { r: ValuationResult; center: LatLng; stops: TransitStop[]; listings: Listing[] }) {
-  const { t } = useT();
+  const { t, f } = useT();
   const px = (p: LatLng) => {
     const m = toLocalM(center, p);
     return { x: SIZE / 2 + (m.x / HALF) * (SIZE / 2), y: SIZE / 2 - (m.y / HALF) * (SIZE / 2) };
@@ -34,7 +34,7 @@ export function MapView({ r, center, stops, listings }: { r: ValuationResult; ce
         {[300, 600, 1000].map((m) => (
           <g key={m}>
             <circle cx={SIZE / 2} cy={SIZE / 2} r={rPx(m)} fill="none" stroke="var(--c-grid)" strokeDasharray={m === r.comparables.radiusM ? "0" : "4 4"} strokeWidth={m === r.comparables.radiusM ? 1.5 : 1} />
-            <text x={SIZE / 2 + rPx(m) * 0.707 + 3} y={SIZE / 2 - rPx(m) * 0.707 - 3} className="map-label">{m} m</text>
+            <text x={SIZE / 2 + rPx(m) * 0.707 + 3} y={SIZE / 2 - rPx(m) * 0.707 - 3} className="map-label">{f.dist(m)}</text>
           </g>
         ))}
         {/* Renewal projects */}

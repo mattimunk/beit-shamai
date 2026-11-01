@@ -40,6 +40,8 @@ export interface ValuationConfig {
     newBuildPremium: number;
     leaseholdDiscount: number;
   };
+  /** Income cross-check: typical gross rental yield range (placeholder, calibrate per city). */
+  income: { grossYieldRange: [number, number] };
   comparables: {
     radiiM: number[];
     maxMonths: number;
@@ -84,6 +86,7 @@ export const DEFAULT_CONFIG: ValuationConfig = {
     newBuildPremium: 0.05,
     leaseholdDiscount: -0.02,
   },
+  income: { grossYieldRange: [0.025, 0.035] },
   comparables: {
     radiiM: [300, 600, 1000, 1500],
     maxMonths: 24,
@@ -158,5 +161,6 @@ export function configFor(overrides?: Partial<ValuationConfig>): ValuationConfig
     parkingNis: { ...DEFAULT_CONFIG.parkingNis, ...(overrides.parkingNis ?? {}) },
     adjustments: { ...DEFAULT_CONFIG.adjustments, ...(overrides.adjustments ?? {}) },
     comparables: { ...DEFAULT_CONFIG.comparables, ...(overrides.comparables ?? {}) },
+    income: { ...DEFAULT_CONFIG.income, ...(overrides.income ?? {}) },
   };
 }

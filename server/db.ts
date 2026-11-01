@@ -38,6 +38,10 @@ export function openDb(path = process.env.DB_PATH ?? "beit-shamai.sqlite"): Data
       id TEXT PRIMARY KEY, lat REAL, lng REAL, json TEXT NOT NULL, fetched_at TEXT
     );
     CREATE INDEX IF NOT EXISTS signals_geo ON signals(lat, lng);
+    CREATE TABLE IF NOT EXISTS documents (
+      id TEXT PRIMARY KEY, case_id TEXT, kind TEXT, file_name TEXT, mime TEXT, size INTEGER, path TEXT, added_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS documents_case ON documents(case_id);
     CREATE TABLE IF NOT EXISTS job_runs (
       job TEXT, scope TEXT, started_at TEXT, finished_at TEXT, ok INTEGER, detail TEXT
     );

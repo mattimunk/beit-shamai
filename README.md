@@ -14,6 +14,39 @@ This repository is **Phase 1** of the product spec ([Beit Shamai – product spe
 | Estimate | Realtor | סקר מחירים / Price survey | Realtors may not give valuations |
 | Signed | Buyer, on request | שומת מקרקעין | Issued and signed by a partner licensed appraiser (not built yet) |
 
+## The report
+
+The report follows the format Israeli appraisers use, so a licensed appraiser can review and sign it as their own. Its chapters cover the mandatory contents in the schedule to the Real Estate Appraisers (Professional Ethics) Regulations, in the order of the Chief Government Appraiser's guide to reading appraisals:
+
+1. Purpose
+2. Valuation date and site visit
+3. Documents relied upon
+4. Property identification (Standard 4.2)
+5. Description, with the area schedule per Standard 9.1
+6. Planning and permits
+7. Legal status
+8. Comparable data: selected deals with every adjustment, plus deals examined and excluded with the reason
+9. Coefficients
+10. Principles, factors and considerations, numbered א׳, ב׳ … י״א
+11. Calculation
+12. Valuation: the conventional conclusion with the amount in words
+13. Declaration and signature
+
+It comes in three variants:
+- **Buyer**: an automated estimate, carrying the Standard 20 disclaimer
+- **Realtor**: a price survey, with no valuation
+- **Appraiser**: a full appraisal draft, watermarked "טיוטה" (draft), with the appraiser's letterhead, declaration and signature block
+
+### Documents
+
+Users upload documents (land-registry extract, purchase and rental contracts, plans, building permit, Form 4, arnona bill, condominium order, engineer report, previous appraisals, photos). The type is guessed from the file name, and a few key fields are confirmed per document:
+- The registry extract sets rights and parcel identity, and the legal chapter (mortgage, caveats).
+- Purchase contracts join the unit's sale history.
+- A rental contract adds an income cross-check (gross yield against a typical range; placeholder, to be calibrated).
+- Permits, Form 4, plans and the arnona bill feed the planning chapter.
+
+Every document is listed in "documents relied upon". In the demo, files stay in the browser. In live mode they are stored on the server in Israel, per case (`/api/cases/:id/documents`).
+
 ## Server (live data)
 
 `server/` is a Bun API with SQLite storage:
