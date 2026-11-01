@@ -222,3 +222,9 @@ tr.total td { font-weight: 700; border-top: 2px solid var(--c-ink); }
   .addon { grid-template-columns: 1fr 1fr; }
   .addon:has(select + select) { grid-template-columns: 1fr 1fr; }
 }
+
+.address-search { position: relative; }
+.address-search input { font-size: 14px; padding: 8px 10px; }
+.hits { position: absolute; inset-inline: 0; top: 100%; z-index: 4; list-style: none; margin: 2px 0 0; padding: 4px; background: var(--c-surface); border: 1px solid var(--c-line); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,0.08); }
+.hits button { display: block; width: 100%; text-align: start; border: 0; background: none; padding: 6px 8px; border-radius: 6px; }
+.hits button:hover { background: var(--c-accent-soft); }

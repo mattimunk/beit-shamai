@@ -23,6 +23,8 @@ export interface FutureLineImpact {
 
 export interface TransportResult {
   nearest: NearestStop[];
+  /** Stops within 1.2 km, for the map. */
+  stopsNearby: TransitStop[];
   /** Weighted departures/hour within a 10-minute walk. */
   frequencyScore: number;
   score: number; // 0..100
@@ -92,5 +94,6 @@ export function analyseTransport(
     })
     .sort((a, b) => a.distanceM - b.distanceM);
 
-  return { nearest, frequencyScore, score, future };
+  const stopsNearby = stops.filter((s) => distanceM(at, s.location) <= 1200);
+  return { nearest, stopsNearby, frequencyScore, score, future };
 }

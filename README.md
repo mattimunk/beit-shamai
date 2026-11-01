@@ -18,16 +18,23 @@ This repository is **Phase 1** of the product spec ([Beit Shamai – product spe
 
 `server/` is a Bun API with SQLite storage:
 
-- **Deals**: `server/govmap.ts` pulls Tax Authority deals from GovMap (`/real-estate/deals/{ITM point}/{radius}`), converts ITM ⇄ WGS84 (`server/itm.ts`) and tolerates field-name variants, Hebrew floor words and padded block/parcel numbers. **GovMap answers Israeli IPs only**, so run `bun run server/probe-govmap.ts <lat> <lng> <radius>` once from an Israeli host to confirm the field mapping. It saves a real fixture for the tests.
+- **Deals**: `server/govmap.ts` pulls Tax Authority deals from GovMap (`/real-estate/deals/{ITM point}/{radius}`), converts ITM ⇄ WGS84 (`server/itm.ts`) and tolerates field-name variants, Hebrew floor words and padded block/parcel numbers. **GovMap answers Israeli IPs only**, so run `bun run server/probe.ts` once from the server to confirm the field mapping. It saves real fixtures for the tests.
 - **Listing ledger**: `server/ledger.ts` imports licensed feeds (Yad2 / Madlan data licences, agency CRMs). It tracks first seen, last seen, every price change and removal, and full snapshots mark disappeared adverts as removed. Scraping Yad2 or Madlan breaches their terms of use, so the ledger only accepts delivered data.
 - **Nightly job**: `/api/jobs/sync-deals`, then the feed imports, then `/api/jobs/match`, which stores advert↔deal pairs.
-- **Valuation**: `POST /api/valuate { subject }` runs the same engine on real data. Sources not connected yet (GTFS, plans, renewal signals, CBS index) come back empty rather than invented.
+- **Public sources** (`server/connectors/`):
+  - National GTFS timetable (streamed; weekday morning-peak departures per stop)
+  - CBS dwelling price index by district
+  - Planning Administration renewal-related plans and Urban Renewal Authority declared complexes (ArcGIS layers, configurable)
+  - GovMap address search
+- **Scheduler** (`server/scheduler.ts`): nightly deals and matching, weekly GTFS and renewal, monthly CBS, daily backup. Freshness per source is shown at `/health`.
+- **Valuation**: `POST /api/valuate { subject }` runs the same engine on real data. The server also serves the web app, which then offers address search and a Demo / Live switch. Sources not loaded yet come back empty rather than invented.
+- **Source check**: `bun run server/probe.ts` calls every external source once from the server and reports PASS / FAIL, saving raw responses as fixtures.
 
 ```bash
 ADMIN_TOKEN=... DB_PATH=./data.sqlite bun run server/main.ts   # http://localhost:8787
 ```
 
-Deploy in an Israeli cloud region (e.g. AWS il-central-1 or GCP me-west1).
+Deploy in an Israeli cloud region: see **[docs/DEPLOY.md](docs/DEPLOY.md)**, a step-by-step guide for Google Cloud Tel Aviv (me-west1) using Docker Compose with automatic HTTPS. CI (`.github/workflows/ci.yml`) runs the tests, the build and the Docker build on every push.
 
 ## Run it
 

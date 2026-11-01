@@ -1,38 +1,77 @@
 /**
- * Beit Shamai API server (Bun).
+ * Beit Shamai API server (Bun). Serves the web app and the API.
  *
- *   GET  /health
+ *   GET  /                         the web app (dist/index.html, built by `bun run build`)
+ *   GET  /health                   status and data freshness per source
+ *   GET  /api/geocode?q=...        address search (GovMap)
  *   POST /api/valuate              { subject, date? }                  → ValuationResult
  *   POST /api/listings/import      ImportRequest (licensed feeds)      → ImportResult      [admin]
- *   POST /api/jobs/sync-deals      { lat, lng, radiusM }               → { stored, unmapped } [admin]
- *   POST /api/jobs/match           { lat, lng, radiusM, sinceIso? }    → match stats        [admin]
+ *   POST /api/jobs/:job            run a job now: deals | match | gtfs | cbs | renewal | backup [admin]
  *   GET  /api/pairs?lat&lng&radiusM                                    → matched pairs      [admin]
  *
  * Deploy in an Israeli region: GovMap / nadlan.gov.il answer Israeli IPs only.
- * Admin routes need `Authorization: Bearer $ADMIN_TOKEN`.
+ * Admin routes need `Authorization: Bearer $ADMIN_TOKEN`. Set SCHEDULER=1 to run the jobs.
  */
+import { existsSync } from "node:fs";
 import type { Subject } from "../src/engine/types";
 import { valuate } from "../src/engine/valuation";
-import { openDb, pairsNear } from "./db";
+import { lastRun, openDb, pairsNear } from "./db";
 import { importFeed, type ImportRequest } from "./ledger";
-import { rematch, syncDeals } from "./jobs";
+import { backup, rematch, runJob, syncCbs, syncDeals, syncGtfs, syncRenewal } from "./jobs";
 import { SqliteProvider } from "./sqliteProvider";
+import { loadSources, type SourcesConfig } from "./config";
+import { geocode } from "./connectors/geocode";
+import { startScheduler } from "./scheduler";
 
-export function createServer(opts: { dbPath?: string; adminToken?: string; port?: number } = {}) {
+/** How old each source may get before /health reports it stale (hours). */
+const MAX_AGE_H: Record<string, number> = { deals: 36, match: 36, gtfs: 8 * 24, renewal: 8 * 24, cbs: 40 * 24, backup: 36 };
+
+export function health(db: ReturnType<typeof openDb>, cfg: SourcesConfig, now = new Date()) {
+  const sources: Record<string, { lastOk: string | null; stale: boolean; lastError?: string }> = {};
+  const check = (job: string, scope: string) => {
+    const ok = lastRun(db, job, scope);
+    const any = lastRun(db, job, scope, false);
+    const ageH = ok ? (now.getTime() - Date.parse(ok.finished_at)) / 3_600_000 : Infinity;
+    sources[scope === "*" ? job : `${job}:${scope}`] = {
+      lastOk: ok?.finished_at ?? null,
+      stale: ageH > (MAX_AGE_H[job] ?? 48),
+      ...(any && !any.ok ? { lastError: JSON.parse(any.detail)?.error } : {}),
+    };
+  };
+  for (const c of cfg.cities) ["deals", "match", "renewal"].forEach((j) => check(j, c.name));
+  ["gtfs", "cbs", "backup"].forEach((j) => check(j, "*"));
+  return { ok: true, cities: cfg.cities.map((c) => c.name), sources };
+}
+
+export function createServer(opts: { dbPath?: string; adminToken?: string; port?: number; sources?: SourcesConfig; scheduler?: boolean } = {}) {
   const db = openDb(opts.dbPath);
-  const provider = new SqliteProvider(db);
+  const cfg = opts.sources ?? loadSources();
+  const provider = new SqliteProvider(db, cfg);
   const adminToken = opts.adminToken ?? process.env.ADMIN_TOKEN;
+  const appFile = process.env.APP_FILE ?? "dist/index.html";
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
   const isAdmin = (req: Request) => !!adminToken && req.headers.get("authorization") === `Bearer ${adminToken}`;
+  const cityByName = (name: string) => cfg.cities.find((c) => c.name === name);
 
   const server = Bun.serve({
     port: opts.port ?? Number(process.env.PORT ?? 8787),
     async fetch(req) {
       const url = new URL(req.url);
       try {
-        if (url.pathname === "/health") return json({ ok: true });
+        if (url.pathname === "/" || url.pathname === "/index.html") {
+          return existsSync(appFile)
+            ? new Response(Bun.file(appFile), { headers: { "content-type": "text/html; charset=utf-8" } })
+            : new Response("App not built: run `bun run build`.", { status: 503 });
+        }
+        if (url.pathname === "/health") return json(health(db, cfg));
+
+        if (url.pathname === "/api/geocode" && req.method === "GET") {
+          const q = url.searchParams.get("q") ?? "";
+          if (q.trim().length < 2) return json([]);
+          return json(await geocode(q));
+        }
 
         if (url.pathname === "/api/valuate" && req.method === "POST") {
           const body = (await req.json()) as { subject: Subject; date?: string };
@@ -46,14 +85,31 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         if (url.pathname === "/api/listings/import" && req.method === "POST") {
           return json(importFeed(db, (await req.json()) as ImportRequest));
         }
-        if (url.pathname === "/api/jobs/sync-deals" && req.method === "POST") {
-          const b = (await req.json()) as { lat: number; lng: number; radiusM: number };
-          return json(await syncDeals(db, b));
-        }
-        if (url.pathname === "/api/jobs/match" && req.method === "POST") {
-          const b = (await req.json()) as { lat: number; lng: number; radiusM: number; sinceIso?: string };
-          const since = b.sinceIso ?? new Date(Date.now() - 730 * 86_400_000).toISOString().slice(0, 10);
-          return json(rematch(db, b, since));
+        const job = url.pathname.match(/^\/api\/jobs\/([a-z-]+)$/)?.[1];
+        if (job && req.method === "POST") {
+          const b = (await req.json().catch(() => ({}))) as { city?: string; lat?: number; lng?: number; radiusM?: number; sinceIso?: string };
+          const area = b.city ? cityByName(b.city) : b.lat !== undefined ? { name: "adhoc", lat: b.lat, lng: b.lng!, radiusM: b.radiusM ?? 1500, district: "center" as const } : undefined;
+          const scope = area?.name ?? "*";
+          switch (job) {
+            case "sync-deals":
+            case "deals":
+              if (!area) return json({ error: "city or lat/lng required" }, 400);
+              return json(await runJob(db, "deals", scope, () => syncDeals(db, area)));
+            case "match": {
+              if (!area) return json({ error: "city or lat/lng required" }, 400);
+              const since = b.sinceIso ?? new Date(Date.now() - 730 * 86_400_000).toISOString().slice(0, 10);
+              return json(await runJob(db, "match", scope, () => rematch(db, area, since)));
+            }
+            case "renewal":
+              if (!area) return json({ error: "city or lat/lng required" }, 400);
+              return json(await runJob(db, "renewal", scope, () => syncRenewal(db, area, cfg.layers)));
+            case "gtfs":
+              return json(await runJob(db, "gtfs", "*", () => syncGtfs(db, cfg.gtfsUrl)));
+            case "cbs":
+              return json(await runJob(db, "cbs", "*", () => syncCbs(db, cfg.cities.map((c) => c.district), cfg.cbs.codes)));
+            case "backup":
+              return json(await runJob(db, "backup", "*", () => backup(db)));
+          }
         }
         if (url.pathname === "/api/pairs" && req.method === "GET") {
           const lat = Number(url.searchParams.get("lat"));
@@ -67,10 +123,11 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
       }
     },
   });
-  return { server, db };
+  const timer = (opts.scheduler ?? process.env.SCHEDULER === "1") ? startScheduler(db, cfg) : undefined;
+  return { server, db, stop: () => { if (timer) clearInterval(timer); server.stop(true); } };
 }
 
 if (import.meta.main) {
   const { server } = createServer();
-  console.log(`Beit Shamai API on http://localhost:${server.port}`);
+  console.log(`Beit Shamai on http://localhost:${server.port}  (scheduler ${process.env.SCHEDULER === "1" ? "on" : "off"})`);
 }

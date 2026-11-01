@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { valuate, type ValuationResult } from "../engine/valuation";
-import type { Listing, Subject, TransitStop } from "../engine/types";
+import type { Subject } from "../engine/types";
+import { detectServer, valuateRemote } from "../data/apiClient";
 import { DemoProvider, DEMO_VALUATION_DATE } from "../data/demo/demoProvider";
 import { DEMO_SUBJECT } from "../data/demo/demoSubject";
 import { STRINGS, type Lang } from "../i18n/strings";
@@ -28,8 +29,18 @@ export function App() {
   const [tab, setTab] = useState<Tab>("valuation");
   const [subject, setSubject] = useState<Subject>(DEMO_SUBJECT);
   const [result, setResult] = useState<ValuationResult | null>(null);
-  const [mapData, setMapData] = useState<{ stops: TransitStop[]; listings: Listing[] }>({ stops: [], listings: [] });
+  const [serverAvailable, setServerAvailable] = useState(false);
+  const [live, setLive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const t = STRINGS[lang];
+
+  useEffect(() => {
+    detectServer().then((ok) => {
+      setServerAvailable(ok);
+      setLive(ok);
+    });
+  }, []);
 
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -40,19 +51,27 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     const id = setTimeout(async () => {
-      const r = await valuate(subject, provider, DEMO_VALUATION_DATE);
-      const q = { center: subject.location, radiusM: 1600, city: subject.address.city };
-      const [stops, listings] = await Promise.all([provider.getTransitStops(q), provider.getListings(q)]);
-      if (!cancelled) {
-        setResult(r);
-        setMapData({ stops, listings: listings.filter((l) => l.status === "active") });
+      setBusy(true);
+      try {
+        const r = live ? await valuateRemote(subject) : await valuate(subject, provider, DEMO_VALUATION_DATE);
+        if (!cancelled) {
+          setResult(r);
+          setError(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setResult(null);
+          setError((e as Error).message);
+        }
+      } finally {
+        if (!cancelled) setBusy(false);
       }
-    }, 150);
+    }, live ? 500 : 150);
     return () => {
       cancelled = true;
       clearTimeout(id);
     };
-  }, [subject, provider]);
+  }, [subject, provider, live]);
 
   return (
     <LangContext.Provider value={lang}>
@@ -80,26 +99,35 @@ export function App() {
                 </button>
               ))}
             </div>
+            {serverAvailable && (
+              <div className="segmented" role="radiogroup" aria-label="data">
+                <button role="radio" aria-checked={!live} className={!live ? "active" : ""} onClick={() => { setLive(false); setSubject(DEMO_SUBJECT); }}>{t.modeDemo}</button>
+                <button role="radio" aria-checked={live} className={live ? "active" : ""} onClick={() => setLive(true)}>{t.modeLive}</button>
+              </div>
+            )}
             <button className="ghost" onClick={() => setLang(lang === "he" ? "en" : "he")}>{t.lang}</button>
             {tab === "report" && canPrint && <button className="primary" onClick={() => window.print()}>{t.print}</button>}
           </div>
         </header>
 
-        {provider.isDemo && <div className="demo-banner no-print">{t.demoBanner}</div>}
+        {!live && <div className="demo-banner no-print">{t.demoBanner}</div>}
 
         {tab === "valuation" ? (
           <main className="layout">
             <aside className="inputs no-print">
               <h2>{t.inputs}</h2>
-              <PropertyForm subject={subject} onChange={setSubject} />
+              <PropertyForm subject={subject} onChange={setSubject} live={live} />
             </aside>
             <div className="results">
+              {busy && !result && <div className="card muted">{t.loading}</div>}
+              {error && <div className="card warnings">{t.liveError} {error}</div>}
+              {result && live && result.comparables.used.length === 0 && <div className="card warnings">{t.liveEmpty}</div>}
               {result && (
                 <>
                   <div className="top-row">
                     <ValueCard r={result} role={role} />
                     <Card title={t.map} className="map-card">
-                      <MapView r={result} center={subject.location} stops={mapData.stops} listings={mapData.listings} />
+                      <MapView r={result} center={subject.location} stops={result.transport.stopsNearby} listings={result.market.activeListings} />
                     </Card>
                   </div>
                   <Warnings r={result} />

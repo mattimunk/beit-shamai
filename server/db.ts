@@ -4,7 +4,7 @@
  * when volume requires it; the interface stays the same.
  */
 import { Database } from "bun:sqlite";
-import type { Deal, Listing } from "../src/engine/types";
+import type { Deal, Listing, PriceIndexPoint, RenewalSignal, TransitStop } from "../src/engine/types";
 import type { MatchedPair } from "../src/engine/matching";
 import { parcelKeyOf } from "../src/engine/market";
 
@@ -27,6 +27,21 @@ export function openDb(path = process.env.DB_PATH ?? "beit-shamai.sqlite"): Data
       deal_id TEXT PRIMARY KEY, listing_id TEXT, lat REAL, lng REAL, date TEXT, json TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS pairs_geo ON pairs(lat, lng);
+    CREATE TABLE IF NOT EXISTS stops (
+      id TEXT PRIMARY KEY, lat REAL, lng REAL, json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS stops_geo ON stops(lat, lng);
+    CREATE TABLE IF NOT EXISTS price_index (
+      district TEXT, month TEXT, value REAL, PRIMARY KEY (district, month)
+    );
+    CREATE TABLE IF NOT EXISTS signals (
+      id TEXT PRIMARY KEY, lat REAL, lng REAL, json TEXT NOT NULL, fetched_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS signals_geo ON signals(lat, lng);
+    CREATE TABLE IF NOT EXISTS job_runs (
+      job TEXT, scope TEXT, started_at TEXT, finished_at TEXT, ok INTEGER, detail TEXT
+    );
+    CREATE INDEX IF NOT EXISTS job_runs_job ON job_runs(job, scope, started_at);
   `);
   return db;
 }
@@ -109,4 +124,54 @@ export function pairsNear(db: Database, lat: number, lng: number, radiusM: numbe
     .query(`SELECT json FROM pairs WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ? AND date >= ?`)
     .all(b.minLat, b.maxLat, b.minLng, b.maxLng, sinceIso)
     .map((r: any) => JSON.parse(r.json) as MatchedPair);
+}
+
+export function replaceStops(db: Database, stops: TransitStop[]) {
+  const ins = db.prepare(`INSERT INTO stops (id, lat, lng, json) VALUES (?, ?, ?, ?)`);
+  db.transaction(() => {
+    db.exec("DELETE FROM stops");
+    for (const s of stops) ins.run(s.id, s.location.lat, s.location.lng, JSON.stringify(s));
+  })();
+}
+
+export function stopsNear(db: Database, lat: number, lng: number, radiusM: number): TransitStop[] {
+  const b = bbox(lat, lng, radiusM);
+  return db
+    .query(`SELECT json FROM stops WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?`)
+    .all(b.minLat, b.maxLat, b.minLng, b.maxLng)
+    .map((r: any) => JSON.parse(r.json) as TransitStop);
+}
+
+export function savePriceIndex(db: Database, district: string, pts: PriceIndexPoint[]) {
+  const ins = db.prepare(`INSERT OR REPLACE INTO price_index (district, month, value) VALUES (?, ?, ?)`);
+  db.transaction(() => { for (const p of pts) ins.run(district, p.month, p.value); })();
+}
+
+export function priceIndex(db: Database, district: string): PriceIndexPoint[] {
+  return db.query(`SELECT month, value FROM price_index WHERE district = ? ORDER BY month`).all(district) as PriceIndexPoint[];
+}
+
+export function upsertSignals(db: Database, signals: RenewalSignal[], fetchedAt: string) {
+  const ins = db.prepare(`INSERT OR REPLACE INTO signals (id, lat, lng, json, fetched_at) VALUES (?, ?, ?, ?, ?)`);
+  db.transaction(() => { for (const s of signals) ins.run(s.id, s.location.lat, s.location.lng, JSON.stringify(s), fetchedAt); })();
+}
+
+export function signalsNear(db: Database, lat: number, lng: number, radiusM: number): RenewalSignal[] {
+  const b = bbox(lat, lng, radiusM);
+  return db
+    .query(`SELECT json FROM signals WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?`)
+    .all(b.minLat, b.maxLat, b.minLng, b.maxLng)
+    .map((r: any) => JSON.parse(r.json) as RenewalSignal);
+}
+
+export function recordJob(db: Database, job: string, scope: string, startedAt: string, ok: boolean, detail: unknown) {
+  db.query(`INSERT INTO job_runs (job, scope, started_at, finished_at, ok, detail) VALUES (?, ?, ?, ?, ?, ?)`).run(
+    job, scope, startedAt, new Date().toISOString(), ok ? 1 : 0, JSON.stringify(detail),
+  );
+}
+
+export function lastRun(db: Database, job: string, scope = "*", okOnly = true): { started_at: string; finished_at: string; ok: number; detail: string } | null {
+  return db
+    .query(`SELECT started_at, finished_at, ok, detail FROM job_runs WHERE job = ? AND scope = ? ${okOnly ? "AND ok = 1" : ""} ORDER BY started_at DESC LIMIT 1`)
+    .get(job, scope) as any;
 }

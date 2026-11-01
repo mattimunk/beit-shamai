@@ -28,7 +28,7 @@ describe("ITM projection", () => {
   });
 });
 
-describe("GovMap deal mapping (synthetic fixture – replace with a live one from probe-govmap)", () => {
+describe("GovMap deal mapping (synthetic fixture – replace with a live one from server/probe.ts)", () => {
   const xy = wgs84ToItm(32.0853, 34.7818);
   const rows = [
     { objectid: 11, dealAmount: "2,950,000", dealDate: "2026-05-17T00:00:00", assetArea: 92, assetRoomNum: 4, floorNo: "שלישית",

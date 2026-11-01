@@ -12,11 +12,14 @@
 - [x] Tax Authority deals connector via GovMap (needs field verification from an Israeli host)
 - [x] Listing ledger (first seen, price history, removal) with licensed-feed import
 - [x] Advert ↔ deal matching, sale-to-ask and area calibration, calibrated adverts blended into the estimate
-- [ ] Verify GovMap field mapping with `server/probe-govmap.ts` from Israel; add the live fixture to tests
+- [x] Public connectors: GTFS, CBS district index, renewal plans and complexes (ArcGIS), GovMap geocoding
+- [x] Scheduler with per-source freshness, daily backups, Docker + Caddy deployment, CI
+- [x] App live mode: address search and valuation against the server
+- [ ] Deploy to me-west1 and run `server/probe.ts`; lock in field mappings from the live fixtures
+- [ ] Confirm the Urban Renewal Authority complexes layer URL and the plans layer id/fields
+- [ ] Curate future lines (Metro M1–M3 stations, light-rail lines under construction) into config
 - [ ] Sign listing data licences (Yad2, Madlan) or agency feeds; write their feed adapters
 - [ ] Back-fill: historical adverts are needed for matching, so ask licensors for 2+ years of history
-- [ ] Deploy in an Israeli region; nightly sync → import → match schedule
-- [ ] Remaining live connectors: GTFS, CBS index, Urban Renewal Authority layer, plan system
 - [ ] Real map base layer (GovMap / municipal GIS)
 - [ ] Coefficient calibration with 3–5 partner appraisers, per city
 - [ ] Accounts and roles (buyer, realtor, partner appraiser, admin); saved properties and alerts

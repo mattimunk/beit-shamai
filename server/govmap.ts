@@ -7,7 +7,7 @@
  *
  * These endpoints are public but undocumented, and they answer Israeli IPs only. Field names
  * have varied between versions, so mapDeal() accepts several spellings and records anything it
- * could not map. VERIFY against a live response with `bun run server/probe-govmap.ts` from an
+ * could not map. VERIFY against a live response with `bun run server/probe.ts` from an
  * Israeli host before relying on it, and keep fixtures of real responses in tests.
  */
 import type { Deal, ParcelId } from "../src/engine/types";
@@ -19,6 +19,12 @@ export interface GovmapOptions {
   pointFormat: (itm: { x: number; y: number }) => string;
   fetchImpl: typeof fetch;
   timeoutMs: number;
+  /**
+   * Optional HTTP proxy (DEALS_PROXY). The Tax Authority / GovMap may refuse data-centre IPs
+   * even inside Israel; if the probe fails from the cloud server, route through an Israeli
+   * ISP proxy or a small machine on an Israeli office line.
+   */
+  proxy?: string;
 }
 
 export const GOVMAP_DEFAULTS: GovmapOptions = {
@@ -26,6 +32,7 @@ export const GOVMAP_DEFAULTS: GovmapOptions = {
   pointFormat: ({ x, y }) => `${Math.round(x)},${Math.round(y)}`,
   fetchImpl: fetch,
   timeoutMs: 20_000,
+  proxy: process.env.DEALS_PROXY || undefined,
 };
 
 export async function fetchDealsByRadius(
@@ -38,7 +45,9 @@ export async function fetchDealsByRadius(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), o.timeoutMs);
   try {
-    const res = await o.fetchImpl(url, { headers: { accept: "application/json" }, signal: ctrl.signal });
+    const init: RequestInit & { proxy?: string } = { headers: { accept: "application/json" }, signal: ctrl.signal };
+    if (o.proxy) init.proxy = o.proxy; // Bun fetch supports a per-request proxy
+    const res = await o.fetchImpl(url, init);
     if (!res.ok) throw new Error(`GovMap ${res.status} for ${url}`);
     const raw = await res.json();
     const rows = extractRows(raw);

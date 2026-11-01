@@ -1,0 +1,15 @@
+{
+  "cities": [
+    { "name": "תל אביב יפו", "lat": 32.0853, "lng": 34.7818, "radiusM": 4000, "district": "tel_aviv" }
+  ],
+  "cbs": { "codes": {} },
+  "layers": {
+    "plans": { "url": "https://ags.iplan.gov.il/arcgisiplan/rest/services/PlanningPublic/Xplan/MapServer/1", "wkid": 2039 },
+    "complexes": null
+  },
+  "futureLines": [],
+  "cityPolicies": [
+    { "city": "תל אביב יפו", "hasBuildingRenewalPlan": false, "hasRenewalPolicy": true, "renewalLevyPercent": 25 }
+  ],
+  "schedule": { "dealsHourUtc": 0, "gtfsDay": 0, "renewalDay": 1, "cbsDayOfMonth": 17, "backupHourUtc": 1 }
+}

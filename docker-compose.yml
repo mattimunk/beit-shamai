@@ -1,0 +1,29 @@
+# Production stack on one VM: the app, and Caddy for HTTPS (automatic Let's Encrypt).
+# Usage: cp .env.example .env  (edit)  →  docker compose up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - appdata:/data
+      - ./config/sources.json:/app/config/sources.json:ro
+    expose:
+      - "8787"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+
+volumes:
+  appdata:
+  caddydata:

@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import type { AddOn, AddOnType, AreaLevel, Direction, ParkingKind, Subject } from "../engine/types";
 import { useT } from "./context";
+import { AddressSearch } from "./AddressSearch";
 
-type Props = { subject: Subject; onChange: (s: Subject) => void };
+type Props = { subject: Subject; onChange: (s: Subject) => void; live?: boolean };
 
 function Field({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
@@ -39,7 +40,7 @@ const ADDON_TYPES: AddOnType[] = ["sun_balcony", "covered_balcony", "roof_terrac
 const PARKING: ParkingKind[] = ["regular", "covered", "underground", "tandem", "mechanical"];
 const DIRS: Direction[] = ["N", "S", "E", "W"];
 
-export function PropertyForm({ subject: s, onChange }: Props) {
+export function PropertyForm({ subject: s, onChange, live }: Props) {
   const { t } = useT();
   const set = (patch: Partial<Subject>) => onChange({ ...s, ...patch });
   const setAddOn = (i: number, patch: Partial<AddOn>) =>
@@ -52,6 +53,18 @@ export function PropertyForm({ subject: s, onChange }: Props) {
   return (
     <form className="form" onSubmit={(e) => e.preventDefault()}>
       <Section title={t.secProperty}>
+        {live && (
+          <div className="wide">
+            <AddressSearch
+              onPick={(h) =>
+                set({
+                  location: { lat: h.lat, lng: h.lng },
+                  address: { city: h.city ?? s.address.city, street: h.street ?? s.address.street, number: h.number ?? "" },
+                })
+              }
+            />
+          </div>
+        )}
         <Field label={t.street}>
           <input value={s.address.street} onChange={(e) => set({ address: { ...s.address, street: e.target.value } })} />
         </Field>
@@ -59,7 +72,7 @@ export function PropertyForm({ subject: s, onChange }: Props) {
           <input value={s.address.number} onChange={(e) => set({ address: { ...s.address, number: e.target.value } })} />
         </Field>
         <Field label={t.city} wide>
-          <input value={s.address.city} readOnly />
+          <input value={s.address.city} readOnly={!live} onChange={(e) => set({ address: { ...s.address, city: e.target.value } })} />
         </Field>
         <Field label={t.block}>
           <input value={s.parcel?.block ?? ""} onChange={(e) => set({ parcel: { ...(s.parcel ?? { parcel: "" }), block: e.target.value } })} />
