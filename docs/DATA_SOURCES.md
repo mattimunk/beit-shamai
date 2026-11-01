@@ -5,7 +5,8 @@ Every source is tagged with an evidence class. **Completed deals** set value. **
 | Connector (`DataProvider` method) | Source | Class | Access | Notes |
 | --- | --- | --- | --- | --- |
 | `getDeals`, `getUnitHistory` | Israel Tax Authority real-estate database (nadlan.gov.il), GovMap real-estate API, data.gov.il | Completed deal | Public; **answers Israeli IPs only**: run server-side in an Israeli region | Deals appear weeks after signing. The State Comptroller (Oct 2025) flagged completeness and accuracy issues, so outlier filtering is required |
-| `getListings` | Yad2, Madlan, agency feeds | Asking price | **Commercial licence required**: scraping breaches their terms of use | Feeds the listing ledger: first seen, price changes, matches to deals |
+| `getListings` | Yad2, Madlan, agency feeds | Asking price | **Commercial licence required**: scraping breaches their terms of use | Feeds the listing ledger: first seen, price changes, removal |
+| `getMatchedPairs` | Server nightly job: ledger adverts ↔ Tax Authority deals | Derived | Internal | Calibrates asking prices: sale/ask factor, area ratio, days on market. Historical adverts (2+ years) are needed for good coverage |
 | `getPriceIndex` | CBS dwelling price index by district | Index | Public | Monthly, with a lag |
 | `getTransitStops` | National Public Transport Authority GTFS (`gtfs.mot.gov.il/gtfsfiles/israel-public-transportation.zip`) | Transport | Public, daily | Optional SIRI real-time feed for reliability |
 | `getFutureLines` | Statutory plans: Metro NIPs, light rail, TAMA 70 influence area (Planning Administration, GovMap, NTA) | Planning | Public layers | Replace the approximate 800 m Metro influence radius with the official TAMA 70 boundary |

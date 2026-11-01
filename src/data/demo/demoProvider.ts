@@ -31,6 +31,10 @@ const NEIGHBORHOODS = ["מרכז", "צפון", "מזרח"];
 const BASE_PPSQM_NOW = 32_000; // NIS per equivalent sqm at the valuation date, demo only
 const MONTHLY_GROWTH = 0.0025;
 
+function addDaysIso(iso: string, d: number): string {
+  return new Date(Date.parse(iso) + d * 86_400_000).toISOString().slice(0, 10);
+}
+
 function monthIso(offsetMonths: number): string {
   const d = new Date(Date.UTC(2026, 10, 1));
   d.setUTCMonth(d.getUTCMonth() + offsetMonths);
@@ -114,53 +118,100 @@ function generate() {
     };
     deals.push(deal);
 
-    // ~45% of deals were seen as listings first (listing ledger match).
-    if (rnd() < 0.45) {
-      const dom = 25 + Math.floor(rnd() * 160);
-      const first = new Date(Date.parse(date) - dom * 86_400_000).toISOString().slice(0, 10);
-      const ask = Math.round((price * (1.05 + rnd() * 0.06)) / 1000) * 1000;
-      listings.push({
-        id: `demo-listing-m${i + 1}`,
-        evidence: "asking_price",
-        source: pick(["yad2", "madlan", "agency"]),
+    // ~55% of deals were advertised first. The ledger only knows what the adverts showed:
+    // marketing area (larger than registered), sometimes no house number, price cuts over time.
+    if (rnd() < 0.55) {
+      const dom = 15 + Math.floor(Math.pow(rnd(), 1.6) * 300);
+      const first = addDaysIso(date, -dom);
+      const finalRatio = 0.9 + rnd() * 0.1 - (dom > 120 ? 0.02 : 0); // sale / last ask
+      const lastAsk = Math.round(price / finalRatio / 1000) * 1000;
+      const cuts = dom > 90 ? 1 + Math.floor(rnd() * 2) : rnd() < 0.3 ? 1 : 0;
+      const history: { date: string; price: number }[] = [];
+      for (let c = cuts; c >= 0; c--) {
+        history.push({ date: addDaysIso(first, Math.round(((cuts - c) / (cuts + 1)) * dom)), price: Math.round((lastAsk * (1 + c * 0.035)) / 1000) * 1000 });
+      }
+      const advArea = Math.round(area * (1.03 + rnd() * 0.1));
+      const lastSeen = addDaysIso(date, Math.round(rnd() * 20 - 10));
+      const base = {
+        evidence: "asking_price" as const,
         firstSeen: first,
-        lastSeen: date,
-        askingPrice: ask,
-        priceHistory: [{ date: first, price: Math.round(ask * 1.03) }, { date, price: ask }],
-        location,
-        address: deal.address,
-        area,
+        lastSeen,
+        status: "removed" as const,
+        askingPrice: lastAsk,
+        priceHistory: history,
+        location: offsetM(location, rnd() * 20 - 10, rnd() * 20 - 10),
+        address: { ...deal.address, number: rnd() < 0.3 ? "" : deal.address.number },
+        area: advArea,
+        rooms,
+        floor: rnd() < 0.85 ? floor : undefined,
+        yearBuilt: rnd() < 0.5 ? yearBuilt : undefined,
+      };
+      listings.push({ ...base, id: `demo-l-${i}-a`, source: "yad2", sourceId: `y${1000 + i}` });
+      // A third also appear on Madlan, often a little later.
+      if (rnd() < 0.33) {
+        listings.push({ ...base, id: `demo-l-${i}-b`, source: "madlan", sourceId: `m${5000 + i}`, firstSeen: addDaysIso(first, Math.round(rnd() * 20)) });
+      }
+    }
+    // Decoys: withdrawn adverts on the same street, different house – must not match.
+    if (rnd() < 0.15) {
+      listings.push({
+        id: `demo-l-${i}-x`,
+        evidence: "asking_price",
+        source: "yad2",
+        sourceId: `x${i}`,
+        firstSeen: addDaysIso(date, -120),
+        lastSeen: addDaysIso(date, -5),
+        status: "removed",
+        askingPrice: Math.round(price * 1.04 / 1000) * 1000,
+        priceHistory: [{ date: addDaysIso(date, -120), price: Math.round(price * 1.04 / 1000) * 1000 }],
+        location: offsetM(location, 60, 30),
+        address: { ...deal.address, number: String(Number(deal.address.number) + 2) },
+        area: Math.round(area * 1.06),
         rooms,
         floor,
-        matchedDealId: deal.id,
       });
     }
   }
 
-  // Active listings (asking prices today).
-  for (let i = 0; i < 28; i++) {
+  // Active (unsold) adverts today. Long-listed ones tend to be overpriced.
+  for (let i = 0; i < 40; i++) {
     const angle = rnd() * Math.PI * 2;
-    const r = Math.sqrt(rnd()) * 1500;
+    const r = Math.sqrt(rnd()) * 1400;
     const east = Math.cos(angle) * r;
     const location = offsetM(DEMO_ORIGIN, east, Math.sin(angle) * r);
-    const rooms = pick([3, 4, 4, 5]);
-    const area = Math.round(rooms * 22 + 8 + rnd() * 18);
-    const ppsqm = BASE_PPSQM_NOW * (1 + 0.04 * (east / 1000)) * (1.04 + rnd() * 0.1);
-    const firstSeen = `${monthIso(-Math.floor(rnd() * 6))}-${String(1 + Math.floor(rnd() * 27)).padStart(2, "0")}`;
-    const askingPrice = Math.round((ppsqm * area) / 1000) * 1000;
+    const rooms = pick([3, 4, 4, 4, 5]);
+    const area = Math.round(rooms * 22 + 8 + rnd() * 18); // registered (hidden)
+    const floorsInBuilding = 3 + Math.floor(rnd() * 6);
+    const floor = Math.floor(rnd() * floorsInBuilding);
+    const yearBuilt = 1960 + Math.floor(rnd() * 55);
+    const elevator = floorsInBuilding > 4 || rnd() < 0.3;
+    const cond: Condition = pick(["renovated", "original", "original", "needs_work"]);
+    const premium = hiddenPremium(floor, elevator, yearBuilt, cond, "regular", false);
+    const fair = BASE_PPSQM_NOW * (1 + 0.04 * (east / 1000)) * (1 + premium) * (1 + (rnd() - 0.5) * 0.08) * area;
+    const daysListed = Math.floor(Math.pow(rnd(), 1.4) * 260);
+    const overpricing = 1.03 + rnd() * 0.06 + (daysListed > 120 ? 0.04 : 0);
+    const askingPrice = Math.round((fair * overpricing) / 1000) * 1000;
+    const firstSeen = addDaysIso(DEMO_VALUATION_DATE, -daysListed);
     listings.push({
-      id: `demo-listing-a${i + 1}`,
+      id: `demo-a-${i}`,
       evidence: "asking_price",
       source: pick(["yad2", "madlan", "agency"]),
+      sourceId: `a${i}`,
       firstSeen,
       lastSeen: DEMO_VALUATION_DATE,
+      status: "active",
       askingPrice,
-      priceHistory: [{ date: firstSeen, price: askingPrice }],
+      priceHistory: daysListed > 90
+        ? [{ date: firstSeen, price: Math.round(askingPrice * 1.04 / 1000) * 1000 }, { date: addDaysIso(firstSeen, 60), price: askingPrice }]
+        : [{ date: firstSeen, price: askingPrice }],
       location,
-      address: { city: DEMO_CITY, street: pick(STREETS), number: String(1 + Math.floor(rnd() * 60)) },
-      area,
+      address: { city: DEMO_CITY, street: pick(STREETS), number: rnd() < 0.4 ? "" : String(1 + Math.floor(rnd() * 60)) },
+      area: Math.round(area * (1.03 + rnd() * 0.1)),
       rooms,
-      floor: Math.floor(rnd() * 6),
+      floor: rnd() < 0.85 ? floor : undefined,
+      floorsInBuilding,
+      elevator,
+      yearBuilt: rnd() < 0.5 ? yearBuilt : undefined,
     });
   }
 

@@ -7,7 +7,7 @@ import { STRINGS, type Lang } from "../i18n/strings";
 import { LangContext, type Role } from "./context";
 import { PropertyForm } from "./Form";
 import { MapView } from "./MapView";
-import { Card, CompsTable, Disclaimer, AreaTable, MarketPanel, RenewalPanel, TransportPanel, ValueCard, Warnings } from "./Panels";
+import { Card, CompsTable, Disclaimer, AreaTable, BlendPanel, ListingsPanel, MarketPanel, RenewalPanel, TransportPanel, ValueCard, Warnings } from "./Panels";
 import { Report } from "./Report";
 
 type Tab = "valuation" | "report";
@@ -45,7 +45,7 @@ export function App() {
       const [stops, listings] = await Promise.all([provider.getTransitStops(q), provider.getListings(q)]);
       if (!cancelled) {
         setResult(r);
-        setMapData({ stops, listings: listings.filter((l) => !l.matchedDealId) });
+        setMapData({ stops, listings: listings.filter((l) => l.status === "active") });
       }
     }, 150);
     return () => {
@@ -104,10 +104,12 @@ export function App() {
                   </div>
                   <Warnings r={result} />
                   <CompsTable r={result} />
+                  <ListingsPanel r={result} />
                   <div className="two-col">
-                    <AreaTable r={result} />
+                    <BlendPanel r={result} />
                     <MarketPanel r={result} />
                   </div>
+                  <AreaTable r={result} />
                   <div className="two-col">
                     <TransportPanel r={result} />
                     <RenewalPanel r={result} />

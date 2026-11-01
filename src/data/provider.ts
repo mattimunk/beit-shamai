@@ -9,6 +9,7 @@ import type {
   TransitStop,
 } from "../engine/types";
 import type { ValuationConfig } from "../engine/coefficients";
+import type { MatchedPair } from "../engine/matching";
 
 /**
  * Every external source sits behind this interface, so the engine never knows where data
@@ -36,7 +37,13 @@ export interface DataProvider {
   getDeals(q: AreaQuery & { sinceIso: string }): Promise<Deal[]>;
   /** All recorded sales of one unit (block-parcel-subParcel), any date. */
   getUnitHistory(parcelKey: string): Promise<Deal[]>;
+  /** Ledger adverts in the area: active ones and removed ones (needed for matching). */
   getListings(q: AreaQuery): Promise<Listing[]>;
+  /**
+   * Optional: pre-computed advert→deal pairs (the server matches nightly). When absent the
+   * engine matches the deals and adverts it was given.
+   */
+  getMatchedPairs?(q: AreaQuery & { sinceIso: string }): Promise<MatchedPair[]>;
   getPriceIndex(city: string): Promise<PriceIndexPoint[]>;
   getTransitStops(q: AreaQuery): Promise<TransitStop[]>;
   getFutureLines(city: string): Promise<FutureLine[]>;

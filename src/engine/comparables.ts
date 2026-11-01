@@ -74,14 +74,19 @@ export function adjustComparable(
   const iNow = indexAt(index, valuationDate);
   if (iDeal && iNow) lines.push({ key: "time", pct: iNow / iDeal - 1 });
 
-  // Floor & elevator.
+  // Floor & elevator (registry rows do not say whether there is an elevator: assume as subject).
+  const elevatorKnown = deal.elevator !== undefined;
   const fl =
-    floorValue(subject.floor, subject.elevator, cfg) - floorValue(deal.floor, deal.elevator, cfg);
-  if (fl !== 0) lines.push({ key: "floor", pct: fl });
+    floorValue(subject.floor, subject.elevator, cfg) - floorValue(deal.floor, deal.elevator ?? subject.elevator, cfg);
+  if (fl !== 0 || !elevatorKnown) lines.push({ key: "floor", pct: fl, assumed: !elevatorKnown || undefined });
 
-  // Building age (new-build premium handled separately).
-  const ageDiff = Math.max(-50, Math.min(50, subject.yearBuilt - deal.yearBuilt));
-  if (ageDiff !== 0) lines.push({ key: "age", pct: (ageDiff / 10) * a.perDecadeAge });
+  // Building age (new-build premium handled separately). Unknown year → no adjustment, flagged.
+  if (deal.yearBuilt && deal.yearBuilt > 1800) {
+    const ageDiff = Math.max(-50, Math.min(50, subject.yearBuilt - deal.yearBuilt));
+    if (ageDiff !== 0) lines.push({ key: "age", pct: (ageDiff / 10) * a.perDecadeAge });
+  } else {
+    lines.push({ key: "age", pct: 0, assumed: true });
+  }
 
   // Unit condition. Tax Authority records carry no condition: assume "original" and flag it.
   const dealCond: Condition = deal.condition ?? (deal.newBuild ? "new" : "original");

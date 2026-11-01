@@ -109,8 +109,8 @@ const he = {
   adjKey: { time: "זמן", floor: "קומה", age: "גיל", condition: "מצב", view: "נוף", new_build: "חדשה", rights: "זכות" },
   assumedNote: "* הנחה – הנתון אינו קיים ברשומות רשות המסים",
   rejectedCount: (n: number) => `${n} עסקאות נפסלו (רחוקות, ישנות, חריגות או מותאמות יתר)`,
-  market: "הקשר שוק (מחירי ביקוש – לבדיקה בלבד)",
-  askingMedian: "חציון מחיר ביקוש למ״ר",
+  market: "הקשר שוק",
+  askingMedian: "חציון מחיר ביקוש למ״ר (גולמי)",
   vsValue: "פער מול האומדן",
   saleToAsk: "פער מכירה מול ביקוש",
   dom: "ימים בשוק (חציון)",
@@ -169,6 +169,21 @@ const he = {
   },
   unconfirmed: "לא מאומת",
   reliability: { high: "אמינות גבוהה", medium_high: "אמינות בינונית-גבוהה", medium: "אמינות בינונית", low: "אמינות נמוכה" },
+  // asking-price calibration
+  pairsTitle: "מודעות שנמכרו: מחיר מבוקש מול מחיר עסקה",
+  pairsNote: (n: number) => `${n} עסקאות בסביבה זוהו מול מודעת המכירה שלהן ביד2 / מדלן (התאמה לפי כתובת, קומה, חדרים, שטח ומועד).`,
+  pairCols: { date: "תאריך עסקה", address: "כתובת", first: "מחיר ראשון", last: "מחיר אחרון", sale: "מחיר עסקה", ratio: "עסקה/ביקוש", dom: "ימים", cuts: "הורדות", source: "מקור" },
+  calTitle: "מודעות פעילות – מתוקננות למחיר עסקה צפוי",
+  calNote: (r: string, a: string) => `מקדם עסקה/ביקוש מקומי: ${r} · שטח רשום/שטח מפורסם: ${a}. מודעות ותיקות מתוקננות מול דירות שנמכרו אחרי זמן דומה.`,
+  calCols: { address: "כתובת", days: "ימים במודעה", ask: "מחיר מבוקש", ratio: "מקדם", expected: "מחיר צפוי", area: "שטח מפורסם ← משוער", ppsqm: "₪/מ״ר מתואם" },
+  blendTitle: "שקלול הראיות",
+  blendDeals: "עסקאות שבוצעו",
+  blendListings: "מודעות מתוקננות",
+  blendWeight: "משקל",
+  blendFinal: "אומדן משוקלל",
+  blendExplain: "משקל המודעות גדל עם מספר הזוגות המאומתים באזור וכשהעסקאות ישנות יותר, ויורד כשיחסי עסקה/ביקוש מפוזרים. התקרה 40% – העסקאות תמיד דומיננטיות.",
+  dealsOnlyValue: "לפי עסקאות בלבד",
+  noCalibration: "אין די זוגות מודעה-עסקה באזור לתקנון מחירי ביקוש.",
   map: "מפה",
   legend: { subject: "הנכס", comp: "עסקת השוואה", listing: "מודעה פעילה", bus: "תחנה", future: "תחנה עתידית", renewal: "פרויקט התחדשות" },
   warnings: "הערות",
@@ -179,6 +194,7 @@ const he = {
     condition_assumed: "מצב ונוף של עסקאות ההשוואה אינם ברשומות – הונח ״מקורי״ / ״רגיל״.",
     expropriation_risk: (l: string) => `החלקה בתחום הפקעה של ${l}.`,
     declared_area_used: "נעשה שימוש בשטח מוצהר ולא במדידה לפי תקן 9.1.",
+    listings_disagree: (g: string) => `מודעות מתוקננות שונות מהעסקאות ב-${g} – ייתכן שהשוק זז מאז העסקאות.`,
   },
   disclaimer:
     "מסמך זה אינו שומת מקרקעין ואינו מהווה ייעוץ או חוות דעת משפטית (בהתאם לתקן 20). זהו אומדן ממוחשב המבוסס על נתוני עסקאות ופרמטרים שטרם כוילו. לשווי מחייב יש להזמין שומה מאת שמאי מקרקעין מוסמך.",
@@ -189,7 +205,7 @@ const he = {
   reportDate: "מועד האומדן",
   dataSource: "מקור נתונים",
   demo: "הדגמה",
-  sections: { area: "טבלת שטחים (תקן 9.1)", comps: "עסקאות השוואה", market: "הקשר שוק", location: "מיקום ותחבורה", renewal: "התחדשות עירונית" },
+  sections: { area: "טבלת שטחים (תקן 9.1)", comps: "עסקאות השוואה", listings: "מודעות ומחירי ביקוש", market: "הקשר שוק", location: "מיקום ותחבורה", renewal: "התחדשות עירונית" },
 };
 
 type Strings = typeof he;
@@ -296,8 +312,8 @@ const en: Strings = {
   adjKey: { time: "time", floor: "floor", age: "age", condition: "condition", view: "view", new_build: "new", rights: "rights" },
   assumedNote: "* assumed – not in Tax Authority records",
   rejectedCount: (n: number) => `${n} deals excluded (too far, too old, outliers or over-adjusted)`,
-  market: "Market context (asking prices – cross-check only)",
-  askingMedian: "Median asking ₪/sqm",
+  market: "Market context",
+  askingMedian: "Median asking ₪/sqm (raw)",
   vsValue: "Gap vs estimate",
   saleToAsk: "Sale-to-ask gap",
   dom: "Days on market (median)",
@@ -356,6 +372,20 @@ const en: Strings = {
   },
   unconfirmed: "unconfirmed",
   reliability: { high: "high reliability", medium_high: "medium-high reliability", medium: "medium reliability", low: "low reliability" },
+  pairsTitle: "Sold adverts: asking price vs. sale price",
+  pairsNote: (n: number) => `${n} nearby deals were linked to their own Yad2 / Madlan advert (matched on address, floor, rooms, area and timing).`,
+  pairCols: { date: "Deal date", address: "Address", first: "First ask", last: "Last ask", sale: "Sale", ratio: "Sale/ask", dom: "Days", cuts: "Cuts", source: "Source" },
+  calTitle: "Active adverts – calibrated to expected sale price",
+  calNote: (r: string, a: string) => `Local sale/ask factor: ${r} · registered/advertised area: ${a}. Long-listed adverts are calibrated against units that took as long to sell.`,
+  calCols: { address: "Address", days: "Days listed", ask: "Asking", ratio: "Factor", expected: "Expected sale", area: "Adv. → est. area", ppsqm: "Adj. ₪/sqm" },
+  blendTitle: "Weighing the evidence",
+  blendDeals: "Completed deals",
+  blendListings: "Calibrated adverts",
+  blendWeight: "Weight",
+  blendFinal: "Blended estimate",
+  blendExplain: "The adverts' weight grows with the number of verified advert–sale pairs nearby and when the deals are older, and drops when sale/ask ratios are scattered. Capped at 40% so completed deals always dominate.",
+  dealsOnlyValue: "Deals only",
+  noCalibration: "Not enough advert–sale pairs nearby to calibrate asking prices.",
   map: "Map",
   legend: { subject: "Property", comp: "Comparable", listing: "Active listing", bus: "Stop", future: "Future station", renewal: "Renewal project" },
   warnings: "Notes",
@@ -366,6 +396,7 @@ const en: Strings = {
     condition_assumed: "Comparables' condition and view are not in the records – assumed “original” / “regular”.",
     expropriation_risk: (l: string) => `Parcel is inside the expropriation line of ${l}.`,
     declared_area_used: "A declared area was used, not a Standard 9.1 measurement.",
+    listings_disagree: (g: string) => `Calibrated adverts differ from the deals by ${g} – the market may have moved since those deals.`,
   },
   disclaimer:
     "This document is not a real estate appraisal (שומת מקרקעין) and is not legal advice (per Standard 20). It is an automated estimate based on deal data and parameters not yet calibrated. For a binding value, order an appraisal from a licensed appraiser.",
@@ -376,7 +407,7 @@ const en: Strings = {
   reportDate: "Estimate date",
   dataSource: "Data source",
   demo: "Demo",
-  sections: { area: "Area schedule (Standard 9.1)", comps: "Comparables", market: "Market context", location: "Location & transport", renewal: "Urban renewal" },
+  sections: { area: "Area schedule (Standard 9.1)", comps: "Comparables", listings: "Adverts and asking prices", market: "Market context", location: "Location & transport", renewal: "Urban renewal" },
 };
 
 export const STRINGS: Record<Lang, Strings> = { he, en };
@@ -392,8 +423,8 @@ export function fmt(lang: Lang) {
   const pct = (x: number, signed = true) => iso(`${signed && x > 0 ? "+" : ""}${(x * 100).toFixed(1)}%`);
   const dist = (m: number) => (lang === "he" ? `${int.format(m)} מ׳` : `${int.format(m)} m`);
   const date = (iso: string) =>
-    new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "numeric" }).format(new Date(iso));
+    new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(iso));
   const hebDate = (iso: string) =>
-    new Intl.DateTimeFormat("he-IL-u-ca-hebrew", { year: "numeric", month: "long", day: "numeric" }).format(new Date(iso));
+    new Intl.DateTimeFormat("he-IL-u-ca-hebrew", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" }).format(new Date(iso));
   return { nis: (n: number) => nis.format(n), num: (n: number) => num.format(n), int: (n: number) => int.format(n), pct, dist, iso, date, hebDate };
 }

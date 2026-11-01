@@ -27,7 +27,7 @@ export function ValueCard({ r, role }: { r: ValuationResult; role: Role }) {
             {t.range}: {f.nis(r.value.low)} – {f.nis(r.value.high)}
           </div>
           <div className="kpis">
-            <div><b>{f.nis(Math.round(c.ppsqmMedian))}</b><span>{t.perSqm}</span></div>
+            <div><b>{f.nis(Math.round(r.ppsqm ?? c.ppsqmMedian))}</b><span>{t.perSqm}</span></div>
             <div><b>{f.num(r.equivalentArea)}</b><span>{t.eqTotal}</span></div>
             <div>
               <b className={"badge conf-" + c.confidence}>{t.confidenceOpt[c.confidence]}</b>
@@ -35,6 +35,11 @@ export function ValueCard({ r, role }: { r: ValuationResult; role: Role }) {
             </div>
           </div>
           <div className="muted small">{t.basedOn(c.used.length, c.radiusM)}</div>
+          {r.valueDealsOnly && r.listingEvidence && (
+            <div className="muted small">
+              {t.dealsOnlyValue}: {f.nis(r.valueDealsOnly.point)} · {t.blendListings}: {Math.round(r.listingEvidence.blendWeight * 100)}%
+            </div>
+          )}
         </>
       ) : (
         <div className="value muted">—</div>
@@ -52,7 +57,7 @@ export function ValueCard({ r, role }: { r: ValuationResult; role: Role }) {
 }
 
 export function Warnings({ r }: { r: ValuationResult }) {
-  const { t } = useT();
+  const { t, f } = useT();
   if (!r.warnings.length) return null;
   return (
     <section className="card warnings" aria-label={t.warnings}>
@@ -63,6 +68,7 @@ export function Warnings({ r }: { r: ValuationResult }) {
             case "unpermitted_addons": text = t.warning.unpermitted_addons(w.count); break;
             case "assigned_addons": text = t.warning.assigned_addons(w.count); break;
             case "expropriation_risk": text = t.warning.expropriation_risk(w.line); break;
+            case "listings_disagree": text = t.warning.listings_disagree(f.pct(w.gap)); break;
             default: text = t.warning[w.key];
           }
           return <li key={i}>{text}</li>;
@@ -134,7 +140,7 @@ export function CompsTable({ r }: { r: ValuationResult }) {
                 <td><bdi>{x.deal.address.street} {x.deal.address.number}</bdi>{x.deal.newBuild ? " ●" : ""}</td>
                 <td className="num">{x.deal.rooms}</td>
                 <td className="num">{x.deal.area}</td>
-                <td className="num">{x.deal.floor}/{x.deal.floorsInBuilding}</td>
+                <td className="num">{x.deal.floor}{x.deal.floorsInBuilding ? `/${x.deal.floorsInBuilding}` : ""}</td>
                 <td className="num">{f.nis(x.deal.price)}</td>
                 <td className="num">{f.int(x.rawPpsqm)}</td>
                 <td className="adj">
@@ -189,6 +195,118 @@ export function MarketPanel({ r }: { r: ValuationResult }) {
         </ul>
       ) : (
         <p className="muted">{t.none}</p>
+      )}
+    </Card>
+  );
+}
+
+export function BlendPanel({ r }: { r: ValuationResult }) {
+  const { t, f } = useT();
+  const le = r.listingEvidence;
+  if (!r.valueDealsOnly) return null;
+  const w = le?.blendWeight ?? 0;
+  const rows = [
+    { label: t.blendDeals, ppsqm: r.comparables.ppsqmMedian, n: r.comparables.used.length, w: 1 - w },
+    ...(le ? [{ label: t.blendListings, ppsqm: le.ppsqmMedian, n: le.items.length, w }] : []),
+  ];
+  return (
+    <Card title={t.blendTitle}>
+      <table>
+        <thead><tr><th /><th className="num">₪/{t.sqm}</th><th className="num">n</th><th className="num">{t.blendWeight}</th></tr></thead>
+        <tbody>
+          {rows.map((x) => (
+            <tr key={x.label}>
+              <td>{x.label}</td>
+              <td className="num">{f.int(x.ppsqm)}</td>
+              <td className="num">{x.n}</td>
+              <td className="num"><span className="bar" style={{ width: `${Math.round(x.w * 40)}px` }} />{Math.round(x.w * 100)}%</td>
+            </tr>
+          ))}
+          <tr className="total"><td>{t.blendFinal}</td><td className="num">{f.int(r.ppsqm ?? r.comparables.ppsqmMedian)}</td><td /><td /></tr>
+        </tbody>
+      </table>
+      <p className="muted small">{le ? t.blendExplain : t.noCalibration}</p>
+    </Card>
+  );
+}
+
+export function ListingsPanel({ r }: { r: ValuationResult }) {
+  const { t, f } = useT();
+  const le = r.listingEvidence;
+  const pairs = r.market.recentPairs;
+  return (
+    <Card title={t.sections.listings} className="wide-card">
+      <h4>{t.pairsTitle}</h4>
+      {pairs.length ? (
+        <>
+          <p className="muted small">{t.pairsNote(r.market.matchedCount)}</p>
+          <div className="table-scroll">
+            <table className="comps">
+              <thead>
+                <tr>
+                  <th>{t.pairCols.date}</th><th>{t.pairCols.address}</th><th>{t.pairCols.source}</th>
+                  <th className="num">{t.pairCols.first}</th><th className="num">{t.pairCols.last}</th><th className="num">{t.pairCols.sale}</th>
+                  <th className="num">{t.pairCols.ratio}</th><th className="num">{t.pairCols.dom}</th><th className="num">{t.pairCols.cuts}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pairs.map((p) => (
+                  <tr key={p.deal.id}>
+                    <td>{f.date(p.deal.date)}</td>
+                    <td><bdi>{p.deal.address.street} {p.deal.address.number}</bdi> · {t.floor} {p.deal.floor}</td>
+                    <td>{p.listing.source}</td>
+                    <td className="num">{f.nis(p.firstAsk)}</td>
+                    <td className="num">{f.nis(p.lastAsk)}</td>
+                    <td className="num strong">{f.nis(p.salePrice)}</td>
+                    <td className="num"><span className={"chip " + (p.saleToLastAsk < 1 ? "neg" : "pos")}>{f.pct(p.saleToLastAsk - 1)}</span></td>
+                    <td className="num">{p.daysOnMarket}</td>
+                    <td className="num">{p.priceCuts}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <p className="muted">{t.noCalibration}</p>
+      )}
+      {le && (
+        <>
+          <h4>{t.calTitle}</h4>
+          <p className="muted small">{t.calNote(le.model.saleToAsk.toFixed(3), le.model.areaRatio.toFixed(3))}</p>
+          <div className="table-scroll">
+            <table className="comps">
+              <thead>
+                <tr>
+                  <th>{t.calCols.address}</th><th className="num">{t.calCols.days}</th><th className="num">{t.calCols.ask}</th>
+                  <th className="num">{t.calCols.ratio}</th><th className="num">{t.calCols.expected}</th><th className="num">{t.calCols.area}</th>
+                  <th>{t.compCols.adj}</th><th className="num">{t.calCols.ppsqm}</th><th className="num">{t.compCols.dist}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {le.items.map((x) => (
+                  <tr key={x.item.listing.id}>
+                    <td><bdi>{x.item.listing.address.street} {x.item.listing.address.number}</bdi>{x.item.listing.floor !== undefined ? ` · ${t.floor} ${x.item.listing.floor}` : ""} · {x.item.listing.rooms} {t.rooms}</td>
+                    <td className="num">{x.item.daysListed}</td>
+                    <td className="num">{f.nis(x.item.listing.askingPrice)}</td>
+                    <td className="num">× {x.item.ratioUsed.toFixed(3)}</td>
+                    <td className="num strong">{f.nis(x.item.expectedPrice)}</td>
+                    <td className="num">{f.iso(`${x.item.listing.area} → ${x.item.expectedArea}`)}</td>
+                    <td className="adj">
+                      {x.adjustments.map((a) => (
+                        <span key={a.key} className={"chip " + (a.pct > 0 ? "pos" : a.pct < 0 ? "neg" : "")}>
+                          {t.adjKey[a.key]} {f.pct(a.pct)}{a.assumed ? "*" : ""}
+                        </span>
+                      ))}
+                    </td>
+                    <td className="num strong">{f.int(x.adjustedPpsqm)}</td>
+                    <td className="num">{f.dist(x.distanceM)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </Card>
   );

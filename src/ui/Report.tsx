@@ -1,7 +1,7 @@
 import type { Subject } from "../engine/types";
 import type { ValuationResult } from "../engine/valuation";
 import { useT, type Role } from "./context";
-import { AreaTable, CompsTable, Disclaimer, MarketPanel, RenewalPanel, TransportPanel, Warnings } from "./Panels";
+import { AreaTable, BlendPanel, CompsTable, Disclaimer, ListingsPanel, MarketPanel, RenewalPanel, TransportPanel, Warnings } from "./Panels";
 
 /** Printable report in the order defined by the spec (identification → value → … → disclaimer). */
 export function Report({ r, subject, role }: { r: ValuationResult; subject: Subject; role: Role }) {
@@ -42,7 +42,7 @@ export function Report({ r, subject, role }: { r: ValuationResult; subject: Subj
             <div className="value">{f.nis(r.value.point)}</div>
             <div>{t.range}: {f.nis(r.value.low)} – {f.nis(r.value.high)}</div>
             <div className="muted">
-              {f.nis(Math.round(r.comparables.ppsqmMedian))} {t.perSqm} · {t.confidence}: {t.confidenceOpt[r.comparables.confidence]} · {t.basedOn(r.comparables.used.length, r.comparables.radiusM)}
+              {f.nis(Math.round(r.ppsqm ?? r.comparables.ppsqmMedian))} {t.perSqm} · {t.confidence}: {t.confidenceOpt[r.comparables.confidence]} · {t.basedOn(r.comparables.used.length, r.comparables.radiusM)}
             </div>
           </>
         ) : (
@@ -53,6 +53,8 @@ export function Report({ r, subject, role }: { r: ValuationResult; subject: Subj
       <Warnings r={r} />
       <AreaTable r={r} />
       <CompsTable r={r} />
+      <ListingsPanel r={r} />
+      <BlendPanel r={r} />
       <MarketPanel r={r} />
       <TransportPanel r={r} />
       <RenewalPanel r={r} />

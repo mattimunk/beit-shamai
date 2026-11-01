@@ -119,9 +119,12 @@ export interface Deal {
   area: number;
   rooms: number;
   floor: number;
-  floorsInBuilding: number;
-  elevator: boolean;
-  yearBuilt: number;
+  /** Unknown in some registry rows. */
+  floorsInBuilding?: number;
+  /** Unknown in registry rows: assumed like the subject and flagged. */
+  elevator?: boolean;
+  /** Unknown in some registry rows: no age adjustment, flagged. */
+  yearBuilt?: number;
   newBuild: boolean;
   condition?: Condition;
   rights?: RightsType;
@@ -131,21 +134,35 @@ export interface Deal {
   parkingSpaces?: number;
 }
 
+/**
+ * One unit's advert as tracked by the listing ledger. The same flat on Yad2 and Madlan is two
+ * Listing rows (different source/sourceId); the matcher links either to the later deal.
+ */
 export interface Listing {
   id: string;
   evidence: "asking_price";
   source: string; // e.g. "yad2", "madlan", "agency"
+  sourceId: string; // the advert's id on its source
   firstSeen: string;
   lastSeen: string;
+  /** "removed" once the advert disappears from the feed (sold, withdrawn or expired). */
+  status: "active" | "removed";
+  /** Latest asking price. */
   askingPrice: number;
+  /** Every observed price, oldest first. */
   priceHistory: { date: string; price: number }[];
   location: LatLng;
+  /** Adverts often omit the house number; leave it "" when unknown. */
   address: Address;
+  /** Advertised area – often gross / marketing area, larger than the registered area. */
   area: number;
   rooms: number;
-  floor: number;
-  /** Set when the listing was later matched to a completed deal. */
-  matchedDealId?: string;
+  floor?: number;
+  floorsInBuilding?: number;
+  elevator?: boolean;
+  yearBuilt?: number;
+  newBuild?: boolean;
+  parcel?: ParcelId;
 }
 
 export interface PriceIndexPoint {
