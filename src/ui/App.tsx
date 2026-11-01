@@ -12,6 +12,15 @@ import { Report } from "./Report";
 
 type Tab = "valuation" | "report";
 
+// Printing is blocked inside sandboxed frames (e.g. hosted previews); hide the button there.
+const canPrint = (() => {
+  try {
+    return window.self === window.top;
+  } catch {
+    return false;
+  }
+})();
+
 export function App() {
   const provider = useMemo(() => new DemoProvider(), []);
   const [lang, setLang] = useState<Lang>("he");
@@ -72,7 +81,7 @@ export function App() {
               ))}
             </div>
             <button className="ghost" onClick={() => setLang(lang === "he" ? "en" : "he")}>{t.lang}</button>
-            {tab === "report" && <button className="primary" onClick={() => window.print()}>{t.print}</button>}
+            {tab === "report" && canPrint && <button className="primary" onClick={() => window.print()}>{t.print}</button>}
           </div>
         </header>
 
