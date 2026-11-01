@@ -1,0 +1,22 @@
+{
+  "name": "beit-shamai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Digital home valuation for Israeli residential property – Phase 1: comparables engine, add-on coefficients, location and urban-renewal layers, bilingual estimate report.",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run scripts/dev.ts",
+    "build": "bun run scripts/build.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.6.0"
+  }
+}
