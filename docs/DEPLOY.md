@@ -45,6 +45,18 @@ sudo docker compose cp app:/app/tests/fixtures/live ./live-fixtures && tar czf l
 
 **If "GovMap deals" FAILS with 403 or a timeout but other sources pass,** the Tax Authority is refusing cloud (data-centre) addresses. Put an Israeli ISP proxy in `.env` as `DEALS_PROXY=http://user:pass@host:port`, then run `sudo docker compose up -d`. Alternatively, run the deals job from a small machine on an Israeli office line.
 
+## Loading sales data from a file
+
+Until a data arrangement for automated sales access is in place, load completed deals from a CSV (from a licensed vendor, a Tax Authority data request, or an appraiser's records):
+
+```bash
+TOKEN=$(grep ADMIN_TOKEN .env | cut -d= -f2)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/csv" \
+  --data-binary @deals.csv "localhost/api/deals/import?source=vendor-name"
+```
+
+Columns, in Hebrew or English: תאריך עסקה (date), מחיר (price), ישוב (city), רחוב (street), מספר בית (number), גוש/חלקה/תת חלקה (block/parcel/sub-parcel), שטח (area), חדרים (rooms), קומה (floor), קומות בבניין, שנת בנייה. Missing coordinates are looked up automatically. Then run the matching job for the city.
+
 ## 4. Choose the cities
 
 Edit `config/sources.json` (`nano config/sources.json`). Each city needs its name as written in Tax Authority records, a centre point, a radius and its CBS district:

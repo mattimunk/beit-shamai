@@ -27,8 +27,8 @@ export function collectSeries(json: unknown): { code: string; name: string }[] {
   const walk = (v: any) => {
     if (Array.isArray(v)) return v.forEach(walk);
     if (v && typeof v === "object") {
-      const code = v.code ?? v.Code ?? v.id ?? v.codeId;
-      const name = v.name ?? v.Name ?? v.title ?? v.desc ?? v.description;
+      const code = v.codeId ?? v.CodeId ?? v.code ?? v.Code ?? v.id ?? v.indexCode;
+      const name = v.codeName ?? v.CodeName ?? v.name ?? v.Name ?? v.title ?? v.desc ?? v.description ?? v.indexName;
       if (code !== undefined && typeof name === "string") out.push({ code: String(code), name });
       Object.values(v).forEach(walk);
     }
@@ -70,28 +70,30 @@ export function parseIndexData(json: unknown): PriceIndexPoint[] {
 export async function discoverSeries(f: typeof fetch = fetch): Promise<{ code: string; name: string }[]> {
   const chapter = await (await f(`${CBS_BASE}/catalog/chapter?id=aa&format=json&download=false&lang=he`)).json();
   const found = collectSeries(chapter);
-  const subjectIds = new Set<string>();
+  // Subjects: {"subject":[{"subjectId":45,"subjectName":"מדד מחירי דירות",...}, ...]}
+  const subjects = new Map<string, string>();
   const walk = (v: any) => {
     if (Array.isArray(v)) return v.forEach(walk);
     if (v && typeof v === "object") {
-      const sid = v.subjectId ?? v.subject_id ?? v.SubjectId ?? (v.subject && typeof v.subject !== "object" ? v.subject : undefined);
-      if (sid !== undefined) subjectIds.add(String(sid));
+      const sid = v.subjectId ?? v.subject_id ?? v.SubjectId;
+      if (sid !== undefined && sid !== null) subjects.set(String(sid), String(v.subjectName ?? v.SubjectName ?? ""));
       Object.values(v).forEach(walk);
     }
   };
   walk(chapter);
-  // Entries of the chapter itself are often the subjects (code = subject id).
-  for (const s of found) if (/^\d{1,4}$/.test(s.code)) subjectIds.add(s.code);
   const all = [...found];
-  for (const id of [...subjectIds].slice(0, 40)) {
+  // Dwelling-price subjects first, so the useful series are found even if others fail.
+  const ordered = [...subjects.entries()].sort((a, b) => Number(/דירות/.test(b[1])) - Number(/דירות/.test(a[1])));
+  for (const [id, subjectName] of ordered.slice(0, 40)) {
     try {
       const sub = await (await f(`${CBS_BASE}/catalog/subject?id=${id}&format=json&download=false&lang=he`)).json();
-      all.push(...collectSeries(sub));
+      // Carry the subject name into each series name ("מדד מחירי דירות – מחוז תל אביב").
+      for (const s of collectSeries(sub)) all.push({ code: s.code, name: subjectName && !s.name.includes(subjectName) ? `${subjectName} – ${s.name}` : s.name });
     } catch {
       /* skip a subject that fails */
     }
   }
-  return all;
+  return all.filter((s) => s.code !== "null" && s.code !== "undefined");
 }
 
 export async function fetchDistrictIndex(

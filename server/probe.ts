@@ -31,7 +31,7 @@ async function check(source: string, fn: () => Promise<string>) {
   }
 }
 
-await check("GovMap deals (Tax Authority)", async () => {
+await check("GovMap deals (expected to fail: protected by reCAPTCHA)", async () => {
   const r = await fetchDealsByRadius(center, 300, { proxy: process.env.DEALS_PROXY });
   save("govmap-deals", r.raw);
   const rows = extractRows(r.raw);
@@ -65,10 +65,10 @@ await check("Diagnostics (not a source)", async () => {
   return "\n      " + lines.join("\n      ");
 });
 
-await check("GovMap address search", async () => {
+await check(`Address search (${process.env.GOOGLE_MAPS_API_KEY ? "Google" : "OpenStreetMap"})`, async () => {
   const hits = await geocode("דיזנגוף 50 תל אביב");
-  save("govmap-geocode", hits);
-  if (!hits.length) throw new Error("no hits parsed – check response shape in the saved file");
+  save("geocode", hits);
+  if (!hits.length) throw new Error("no results");
   return `${hits.length} hits, first: ${hits[0]!.label} (${hits[0]!.lat.toFixed(5)}, ${hits[0]!.lng.toFixed(5)})`;
 });
 
@@ -76,6 +76,7 @@ await check("CBS dwelling price index", async () => {
   const r = await fetchDistrictIndex("tel_aviv", { code: cfg.cbs.codes.tel_aviv });
   save("cbs-tel-aviv", r);
   if (!r.points.length) throw new Error(`series ${r.code} returned no observations`);
+  save("cbs-tel-aviv-points", r.points.slice(-6));
   return `series ${r.code}: ${r.points.length} months, latest ${r.points.at(-1)!.month} = ${r.points.at(-1)!.value} → pin this code in config`;
 });
 

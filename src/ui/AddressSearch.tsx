@@ -39,6 +39,7 @@ export function AddressSearch({ onPick }: { onPick: (h: GeocodeHit) => void }) {
               </button>
             </li>
           ))}
+          {hits[0]?.attribution && <li className="small muted attribution">{hits[0].attribution}</li>}
         </ul>
       )}
     </div>

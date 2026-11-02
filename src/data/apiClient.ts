@@ -9,6 +9,7 @@ export interface GeocodeHit {
   city?: string;
   street?: string;
   number?: string;
+  attribution?: string;
 }
 
 /** True when the page is served by our server (health endpoint answers). */

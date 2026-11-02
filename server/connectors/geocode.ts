@@ -1,11 +1,12 @@
 /**
- * Address search via GovMap's public autocomplete (Israeli addresses, Hebrew or English).
- *   POST https://www.govmap.gov.il/api/search-service/autocomplete
- * Undocumented: the request body and response shape are handled tolerantly; verify with the
- * probe script from an Israeli host.
+ * Address search for Israeli addresses.
+ *
+ * GovMap's own search is protected by reCAPTCHA and is not used. Providers:
+ *  - Google Geocoding API when GOOGLE_MAPS_API_KEY is set (paid, best Hebrew coverage)
+ *  - otherwise OpenStreetMap Nominatim (free; usage policy: identify the app, at most
+ *    1 request per second, cache results, show "© OpenStreetMap contributors")
  */
 import { itmToWgs84 } from "../itm";
-import { GOVMAP_HEADERS } from "../govmap";
 
 export interface GeocodeHit {
   label: string;
@@ -14,6 +15,7 @@ export interface GeocodeHit {
   city?: string;
   street?: string;
   number?: string;
+  attribution?: string;
 }
 
 export function parseAddressLabel(label: string): { street?: string; number?: string; city?: string } {
@@ -22,6 +24,7 @@ export function parseAddressLabel(label: string): { street?: string; number?: st
   return m ? { street: m[1]!.trim(), number: m[2], city: m[3]?.trim() || undefined } : {};
 }
 
+/** GovMap autocomplete payloads (kept for the official, token-based API if adopted later). */
 export function parseAutocomplete(json: any): GeocodeHit[] {
   const list: any[] = json?.results ?? json?.data ?? json?.Results ?? (Array.isArray(json) ? json : []);
   return list.flatMap((r) => {
@@ -36,7 +39,7 @@ export function parseAutocomplete(json: any): GeocodeHit[] {
         if (m) { x = Number(m[1]); y = Number(m[2]); }
       }
       if (typeof x === "number" && typeof y === "number") {
-        if (x > 1_000_000) return []; // web mercator not supported
+        if (x > 1_000_000) return [];
         if (x > 100_000) ({ lat, lng } = itmToWgs84(x, y));
         else { lng = x; lat = y; }
       }
@@ -46,15 +49,59 @@ export function parseAutocomplete(json: any): GeocodeHit[] {
   });
 }
 
-export async function geocode(q: string, fetchImpl: typeof fetch = fetch): Promise<GeocodeHit[]> {
-  const init: RequestInit & { proxy?: string } = {};
-  if (process.env.DEALS_PROXY) init.proxy = process.env.DEALS_PROXY;
-  const res = await fetchImpl("https://www.govmap.gov.il/api/search-service/autocomplete", {
-    method: "POST",
-    headers: { ...GOVMAP_HEADERS, "content-type": "application/json" },
-    body: JSON.stringify({ searchText: q, language: "he", isAccurate: false, maxResults: 8 }),
-    ...init,
+/** Nominatim jsonv2 with addressdetails=1. */
+export function parseNominatim(json: any): GeocodeHit[] {
+  if (!Array.isArray(json)) return [];
+  return json.flatMap((r: any) => {
+    const lat = Number(r.lat), lng = Number(r.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return [];
+    const a = r.address ?? {};
+    const city = a.city ?? a.town ?? a.village ?? a.municipality;
+    const street = a.road ?? a.pedestrian ?? a.street;
+    const number = a.house_number;
+    const label = street ? `${street}${number ? ` ${number}` : ""}${city ? `, ${city}` : ""}` : String(r.display_name ?? "");
+    return [{ label, lat, lng, city, street, number, attribution: "© OpenStreetMap contributors" }];
   });
-  if (!res.ok) throw new Error(`GovMap autocomplete ${res.status}`);
-  return parseAutocomplete(await res.json());
+}
+
+/** Google Geocoding API results. */
+export function parseGoogle(json: any): GeocodeHit[] {
+  return (json?.results ?? []).flatMap((r: any) => {
+    const loc = r.geometry?.location;
+    if (!loc) return [];
+    const comp = (t: string) => r.address_components?.find((c: any) => c.types?.includes(t))?.long_name;
+    return [{ label: r.formatted_address, lat: loc.lat, lng: loc.lng, city: comp("locality"), street: comp("route"), number: comp("street_number") }];
+  });
+}
+
+const cache = new Map<string, { at: number; hits: GeocodeHit[] }>();
+let lastNominatim = 0;
+
+export async function geocode(q: string, fetchImpl: typeof fetch = fetch): Promise<GeocodeHit[]> {
+  const key = q.trim().toLowerCase();
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < 7 * 86_400_000) return hit.hits;
+
+  let hits: GeocodeHit[];
+  const gkey = process.env.GOOGLE_MAPS_API_KEY;
+  if (gkey) {
+    const u = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&region=il&language=he&components=country:IL&key=${gkey}`;
+    const res = await fetchImpl(u);
+    if (!res.ok) throw new Error(`Google geocoding ${res.status}`);
+    hits = parseGoogle(await res.json());
+  } else {
+    // Respect Nominatim's 1 request/second policy.
+    const wait = 1100 - (Date.now() - lastNominatim);
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastNominatim = Date.now();
+    const u = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&countrycodes=il&limit=6&addressdetails=1&accept-language=he`;
+    const res = await fetchImpl(u, {
+      headers: { "user-agent": `BeitShamai/0.1 (${process.env.CONTACT_EMAIL ?? "admin@example.com"})`, accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`Nominatim ${res.status}`);
+    hits = parseNominatim(await res.json());
+  }
+  cache.set(key, { at: Date.now(), hits });
+  if (cache.size > 5000) cache.delete(cache.keys().next().value!);
+  return hits;
 }

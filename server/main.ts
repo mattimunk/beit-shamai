@@ -7,6 +7,7 @@
  *   POST /api/cases/:caseId/documents  upload one document (multipart: file, kind)
  *   GET  /api/cases/:caseId/documents  list a case's documents
  *   POST /api/valuate              { subject, date? }                  → ValuationResult
+ *   POST /api/deals/import         CSV or { source, rows } of completed deals              [admin]
  *   POST /api/listings/import      ImportRequest (licensed feeds)      → ImportResult      [admin]
  *   POST /api/jobs/:job            run a job now: deals | match | gtfs | cbs | renewal | backup [admin]
  *   GET  /api/pairs?lat&lng&radiusM                                    → matched pairs      [admin]
@@ -25,6 +26,11 @@ import { loadSources, type SourcesConfig } from "./config";
 import { geocode } from "./connectors/geocode";
 import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
+import { importDeals, parseCsv } from "./dealsImport";
+
+async function importDealsFromCsv(db: ReturnType<typeof openDb>, req: Request, source: string) {
+  return importDeals(db, parseCsv(await req.text()), source);
+}
 
 /** How old each source may get before /health reports it stale (hours). */
 const MAX_AGE_H: Record<string, number> = { deals: 36, match: 36, gtfs: 8 * 24, renewal: 8 * 24, cbs: 40 * 24, backup: 36 };
@@ -92,6 +98,16 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
 
         if (url.pathname.startsWith("/api/") && !isAdmin(req)) return json({ error: "unauthorised" }, 401);
 
+        if (url.pathname === "/api/deals/import" && req.method === "POST") {
+          // CSV body (text/csv) or JSON { source, rows }
+          const ct = req.headers.get("content-type") ?? "";
+          const source = url.searchParams.get("source") ?? "import";
+          if (ct.includes("csv") || ct.includes("text/plain")) {
+            return json(await runJob(db, "deals-import", source, () => importDealsFromCsv(db, req, source)));
+          }
+          const b = (await req.json()) as { source?: string; rows: Record<string, unknown>[] };
+          return json(await runJob(db, "deals-import", b.source ?? source, () => importDeals(db, b.rows ?? [], b.source ?? source)));
+        }
         if (url.pathname === "/api/listings/import" && req.method === "POST") {
           return json(importFeed(db, (await req.json()) as ImportRequest));
         }
