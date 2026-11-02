@@ -5,6 +5,7 @@
  * probe script from an Israeli host.
  */
 import { itmToWgs84 } from "../itm";
+import { GOVMAP_HEADERS } from "../govmap";
 
 export interface GeocodeHit {
   label: string;
@@ -46,10 +47,13 @@ export function parseAutocomplete(json: any): GeocodeHit[] {
 }
 
 export async function geocode(q: string, fetchImpl: typeof fetch = fetch): Promise<GeocodeHit[]> {
+  const init: RequestInit & { proxy?: string } = {};
+  if (process.env.DEALS_PROXY) init.proxy = process.env.DEALS_PROXY;
   const res = await fetchImpl("https://www.govmap.gov.il/api/search-service/autocomplete", {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: { ...GOVMAP_HEADERS, "content-type": "application/json" },
     body: JSON.stringify({ searchText: q, language: "he", isAccurate: false, maxResults: 8 }),
+    ...init,
   });
   if (!res.ok) throw new Error(`GovMap autocomplete ${res.status}`);
   return parseAutocomplete(await res.json());

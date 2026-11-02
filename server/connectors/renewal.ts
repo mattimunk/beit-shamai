@@ -24,9 +24,9 @@ export function planToSignal(f: ArcgisFeature, sourceLabel: string, sourceUrl?: 
   const a = f.attributes;
   const name = String(attr(a, ["pl_name", "plan_name", "PL_NAME", "name", "shem_tochnit", "שם תכנית"]) ?? "");
   const number = String(attr(a, ["pl_number", "plan_number", "PL_NUMBER", "mispar_tochnit", "number"]) ?? "");
-  const goals = String(attr(a, ["pl_goals", "goals", "matarot", "description"]) ?? "");
+  const goals = String(attr(a, ["pl_objectives", "pl_goals", "goals", "matarot", "description", "pl_landuse_string"]) ?? "");
   if (!RENEWAL_WORDS.test(`${name} ${goals}`)) return null;
-  const stage = planStage(String(attr(a, ["station_desc", "status", "pl_status", "STATUS", "שלב"]) ?? ""));
+  const stage = planStage(String(attr(a, ["internet_short_status", "station_desc", "status", "pl_status", "STATUS", "שלב"]) ?? ""));
   if (!stage) return null;
   const units = Number(attr(a, ["quantity_delta_120", "units_added", "yechidot_diur", "dwelling_units"]));
   return {
@@ -38,7 +38,7 @@ export function planToSignal(f: ArcgisFeature, sourceLabel: string, sourceUrl?: 
     location: f.location,
     label: number ? `${name} (${number})` : name,
     unitsPlanned: Number.isFinite(units) && units > 0 ? units : undefined,
-    source: { label: sourceLabel, url: sourceUrl },
+    source: { label: sourceLabel, url: String(attr(a, ["pl_url"]) ?? "") || sourceUrl },
   };
 }
 

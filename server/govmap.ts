@@ -35,6 +35,18 @@ export const GOVMAP_DEFAULTS: GovmapOptions = {
   proxy: process.env.DEALS_PROXY || undefined,
 };
 
+/**
+ * GovMap's public API is used by its own website; requests without the site's usual headers
+ * can be refused (403). These are the headers a browser on govmap.gov.il sends.
+ */
+export const GOVMAP_HEADERS: Record<string, string> = {
+  accept: "application/json, text/plain, */*",
+  "accept-language": "he-IL,he;q=0.9,en;q=0.8",
+  origin: "https://www.govmap.gov.il",
+  referer: "https://www.govmap.gov.il/",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+};
+
 export async function fetchDealsByRadius(
   center: { lat: number; lng: number },
   radiusM: number,
@@ -45,7 +57,7 @@ export async function fetchDealsByRadius(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), o.timeoutMs);
   try {
-    const init: RequestInit & { proxy?: string } = { headers: { accept: "application/json" }, signal: ctrl.signal };
+    const init: RequestInit & { proxy?: string } = { headers: GOVMAP_HEADERS, signal: ctrl.signal };
     if (o.proxy) init.proxy = o.proxy; // Bun fetch supports a per-request proxy
     const res = await o.fetchImpl(url, init);
     if (!res.ok) throw new Error(`GovMap ${res.status} for ${url}`);

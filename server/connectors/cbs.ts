@@ -63,6 +63,37 @@ export function parseIndexData(json: unknown): PriceIndexPoint[] {
   return [...byMonth.values()].sort((a, b) => (a.month < b.month ? -1 : 1));
 }
 
+/**
+ * Catalogue walk: chapter "aa" (housing market) lists subjects; each subject lists its index
+ * series codes. Series found directly in the chapter response are kept too.
+ */
+export async function discoverSeries(f: typeof fetch = fetch): Promise<{ code: string; name: string }[]> {
+  const chapter = await (await f(`${CBS_BASE}/catalog/chapter?id=aa&format=json&download=false&lang=he`)).json();
+  const found = collectSeries(chapter);
+  const subjectIds = new Set<string>();
+  const walk = (v: any) => {
+    if (Array.isArray(v)) return v.forEach(walk);
+    if (v && typeof v === "object") {
+      const sid = v.subjectId ?? v.subject_id ?? v.SubjectId ?? (v.subject && typeof v.subject !== "object" ? v.subject : undefined);
+      if (sid !== undefined) subjectIds.add(String(sid));
+      Object.values(v).forEach(walk);
+    }
+  };
+  walk(chapter);
+  // Entries of the chapter itself are often the subjects (code = subject id).
+  for (const s of found) if (/^\d{1,4}$/.test(s.code)) subjectIds.add(s.code);
+  const all = [...found];
+  for (const id of [...subjectIds].slice(0, 40)) {
+    try {
+      const sub = await (await f(`${CBS_BASE}/catalog/subject?id=${id}&format=json&download=false&lang=he`)).json();
+      all.push(...collectSeries(sub));
+    } catch {
+      /* skip a subject that fails */
+    }
+  }
+  return all;
+}
+
 export async function fetchDistrictIndex(
   district: District,
   opts: { code?: string; startPeriod?: string; fetchImpl?: typeof fetch } = {},
@@ -70,10 +101,12 @@ export async function fetchDistrictIndex(
   const f = opts.fetchImpl ?? fetch;
   let code = opts.code;
   if (!code) {
-    const cat = await (await f(`${CBS_BASE}/catalog/chapter?id=aa&format=json&download=false&lang=he`)).json();
-    const series = collectSeries(cat);
+    const series = await discoverSeries(f);
     code = pickDistrictCode(series, district);
-    if (!code) throw new Error(`CBS: no dwelling index series found for district ${district}`);
+    if (!code) {
+      const sample = series.slice(0, 8).map((x) => `${x.code}:${x.name}`).join(" | ");
+      throw new Error(`CBS: no dwelling index series found for district ${district}. Seen: ${sample || "(none)"}`);
+    }
   }
   const start = opts.startPeriod ?? "01-2018";
   const res = await f(`${CBS_BASE}/data/price?id=${code}&format=json&download=false&startPeriod=${start}&lang=he`);
