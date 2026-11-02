@@ -4,5 +4,5 @@ dist/
 *.log
 .env
 config/sources.json
-data/
+/data/
 tests/fixtures/live/
