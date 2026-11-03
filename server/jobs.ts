@@ -6,7 +6,7 @@ import {
   dealsNear, listingsNear, recordJob, replacePairs, replaceStops, savePriceIndex, upsertDeals, upsertSignals,
 } from "./db";
 import { downloadGtfs, parseGtfs } from "./connectors/gtfs";
-import { syncParcels } from "./connectors/parcelsOpen";
+import { importParcelZip, syncParcels } from "./connectors/parcelsOpen";
 import { relocateUnlocated } from "./taxImport";
 import { fetchDistrictIndex, type District } from "./connectors/cbs";
 import { fetchRenewalSignals } from "./connectors/renewal";
@@ -68,8 +68,9 @@ export function rematch(db: Database, area: { lat: number; lng: number; radiusM:
 }
 
 /** Monthly: the national parcel layer, then place any Tax Authority deals still waiting. */
-export async function syncParcelLayer(db: Database, dir = process.env.DATA_DIR ?? "data", url?: string) {
-  const r = await syncParcels(db, `${dir}/parcels`, url, (s) => console.log(`[parcels] ${s}`));
+export async function syncParcelLayer(db: Database, dir = process.env.DATA_DIR ?? "data", url?: string, localZip?: string) {
+  const log = (s: string) => console.log(`[parcels] ${s}`);
+  const r = localZip ? await importParcelZip(db, localZip, log) : await syncParcels(db, `${dir}/parcels`, url, log);
   const placed = await relocateUnlocated(db, undefined);
   return { ...r, dealsPlaced: placed.placed, dealsWaiting: placed.waiting };
 }

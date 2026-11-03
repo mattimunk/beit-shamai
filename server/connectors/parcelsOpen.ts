@@ -135,7 +135,13 @@ async function importParcelStreams(db: Database, shpE: ZipEntry, dbfE: ZipEntry,
 export async function syncParcels(db: Database, dir: string, url = PARCELS_URL, log: (s: string) => void = () => {}): Promise<ParcelImportResult> {
   mkdirSync(dir, { recursive: true });
   const path = `${dir}/parcel_all.zip`;
-  const res = await fetch(url);
+  const contact = process.env.CONTACT_EMAIL?.trim();
+  const res = await fetch(url, {
+    headers: { "user-agent": `BeitShamai/0.1 (open-data import${contact ? `; ${contact}` : ""})`, accept: "application/zip,application/octet-stream,*/*" },
+    redirect: "follow",
+  });
+  if (res.status === 403)
+    throw new Error("data.gov.il refused the download (403) – download parcel_all.zip in a browser and import it from a file (see docs/DEPLOY.md, 'Parcel layer')");
   if (!res.ok) throw new Error(`parcels download ${res.status}`);
   await Bun.write(path, res);
   log(`downloaded ${(Bun.file(path).size / 1e6).toFixed(0)} MB`);

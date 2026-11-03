@@ -108,6 +108,30 @@ cd beit-shamai && ./deploy/update.sh
 
 Data lives in the Docker volume `appdata` and survives updates. For off-site backups, copy `/data/backups` to a Cloud Storage bucket. That's one `gsutil rsync` line in cron, and Claude can add it.
 
+## Parcel layer
+
+Tax Authority deals are placed on the map from the Survey of Israel's national parcel layer
+(data.gov.il). The server downloads it monthly. To load it now:
+
+```bash
+sudo docker compose exec app bun run server/importParcels.ts
+```
+
+If data.gov.il refuses the server (403), download it yourself and hand it over:
+
+1. In your browser, open
+   `https://data.gov.il/dataset/dff8a168-af6c-4e0f-bbe3-c4bd3646084c` and download
+   **parcel_all.zip** (about 640 MB).
+2. In the Google Cloud SSH window, click **Upload file** (top right) and choose the zip. It
+   lands in your home folder.
+3. Then:
+   ```bash
+   cd ~/beit-shamai
+   sudo docker compose cp ~/parcel_all.zip app:/data/parcel_all.zip
+   sudo docker compose exec app bun run server/importParcels.ts /data/parcel_all.zip
+   rm ~/parcel_all.zip
+   ```
+
 ## Listing feeds
 
 When a Yad2 / Madlan / agency feed is licensed, it is pushed to `POST /api/listings/import` with the admin token, in the format described in `server/ledger.ts`. Send a full daily snapshot per city (`"snapshot": {"city": "..."}`), so adverts that disappear are marked removed. That's how the system learns what sold.
