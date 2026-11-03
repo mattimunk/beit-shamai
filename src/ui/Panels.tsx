@@ -140,7 +140,7 @@ export function CompsTable({ r }: { r: ValuationResult }) {
                 <td><bdi>{x.deal.address.street} {x.deal.address.number}</bdi>{x.deal.newBuild ? " ●" : ""}</td>
                 <td className="num">{x.deal.rooms}</td>
                 <td className="num">{x.deal.area}</td>
-                <td className="num">{x.deal.floor}{x.deal.floorsInBuilding ? `/${x.deal.floorsInBuilding}` : ""}</td>
+                <td className="num">{x.deal.floor ?? "—"}{x.deal.floorsInBuilding ? `/${x.deal.floorsInBuilding}` : ""}</td>
                 <td className="num">{f.nis(x.deal.price)}</td>
                 <td className="num">{f.int(x.rawPpsqm)}</td>
                 <td className="adj">
@@ -253,7 +253,7 @@ export function ListingsPanel({ r }: { r: ValuationResult }) {
                 {pairs.map((p) => (
                   <tr key={p.deal.id}>
                     <td>{f.date(p.deal.date)}</td>
-                    <td><bdi>{p.deal.address.street} {p.deal.address.number}</bdi> · {t.floor} {p.deal.floor}</td>
+                    <td><bdi>{p.deal.address.street} {p.deal.address.number}</bdi> {p.deal.floor !== undefined ? ` · ${t.floor} ${p.deal.floor}` : ""}</td>
                     <td>{p.listing.source}</td>
                     <td className="num">{f.nis(p.firstAsk)}</td>
                     <td className="num">{f.nis(p.lastAsk)}</td>

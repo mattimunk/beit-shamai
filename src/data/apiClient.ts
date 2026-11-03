@@ -52,3 +52,47 @@ export async function uploadDocument(caseId: string, file: File, kind: string): 
   if (!r.ok) throw new Error(j?.error ?? `upload ${r.status}`);
   return j.id as string;
 }
+
+export interface PlanItemDto {
+  id: string; city: string; kind: string; from: string; to: string; areaFrom: number; areaTo: number;
+  status: "pending" | "done" | "covered" | "truncated"; note?: string; parentId?: string;
+}
+export interface RequestDto {
+  id: string; createdAt: string; status: "preliminary" | "final"; finalAt?: string; subject: Subject; items: PlanItemDto[];
+}
+
+export async function createDataRequest(subject: Subject): Promise<RequestDto> {
+  const r = await fetch("/api/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject }) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error ?? `request ${r.status}`);
+  return j;
+}
+
+export async function getDataRequest(id: string): Promise<RequestDto> {
+  const r = await fetch(`/api/requests/${encodeURIComponent(id)}`);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error ?? `request ${r.status}`);
+  return j;
+}
+
+export async function listDataRequests(token: string): Promise<RequestDto[]> {
+  const r = await fetch("/api/requests", { headers: { authorization: `Bearer ${token}` } });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error ?? `requests ${r.status}`);
+  return j;
+}
+
+export async function uploadTaxExport(token: string, requestId: string, itemId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const r = await fetch(`/api/requests/${requestId}/items/${itemId}/upload`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error ?? `upload ${r.status}`);
+  return j as { import: { stored: number; rows: number; partial: number; unlocated: number }; mismatch: string[]; request: RequestDto };
+}
+
+/** Plan item counts used for the preliminary / final label. */
+export function requestProgress(r: RequestDto) {
+  const live = r.items.filter((i) => i.status !== "truncated");
+  return { done: live.filter((i) => i.status !== "pending").length, total: live.length };
+}

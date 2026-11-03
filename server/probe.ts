@@ -98,6 +98,35 @@ for (const [name, layer] of Object.entries(cfg.layers)) {
   });
 }
 
+// Parcel (גוש/חלקה) layer – needed to place Tax Authority export rows, which carry no address.
+if (!cfg.layers.parcels) {
+  await check("Parcel layer discovery (for Tax Authority exports)", async () => {
+    const roots = ["https://ags.iplan.gov.il/arcgisiplan/rest/services", "https://open.govmap.gov.il/arcgis/rest/services"];
+    const found: string[] = [];
+    for (const root of roots) {
+      const walk = async (url: string, depth: number): Promise<void> => {
+        if (depth > 2 || found.length > 15) return;
+        const r = await fetch(`${url}?f=json`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
+        if (!r?.ok) return;
+        const j: any = await r.json().catch(() => ({}));
+        for (const f of j.folders ?? []) await walk(`${root}/${f}`, depth + 1);
+        for (const s of j.services ?? []) {
+          if (!/MapServer|FeatureServer/.test(s.type)) continue;
+          const su = `${root}/${s.name}/${s.type}`;
+          const sj: any = await (await fetch(`${su}?f=json`, { signal: AbortSignal.timeout(15_000) }).catch(() => null))?.json().catch(() => ({}));
+          for (const l of sj?.layers ?? []) {
+            if (/חלק|גוש|parcel|cadast|kadast/i.test(`${l.name} ${s.name}`)) found.push(`${su}/${l.id}  (${l.name})`);
+          }
+        }
+      };
+      await walk(root, 0);
+    }
+    save("parcel-layers", found);
+    if (!found.length) throw new Error("no parcel layer found – deals will be placed at the city centre and flagged");
+    return `candidates:\n      ${found.join("\n      ")}\n      → send these over and I'll pin the right one`;
+  });
+}
+
 console.log("\nSource check\n" + "-".repeat(60));
 for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.source}\n      ${r.note}`);
 console.log(`\nRaw responses saved in ${out}/ – send them over to lock in the field mappings.`);

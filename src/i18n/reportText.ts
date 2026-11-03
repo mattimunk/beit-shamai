@@ -88,7 +88,7 @@ const he = {
   dataIntro: (n: number, months: number, r: number) =>
     `נבחנו עסקאות מכר של דירות מגורים מאגר מידע נדל״ן של רשות המסים, שבוצעו ב-${months} החודשים שקדמו למועד הקובע ברדיוס של עד ${r} מ׳ מהנכס. להלן ${n} העסקאות שנבחרו, וההתאמות שבוצעו לכל אחת.`,
   dataExcluded: "עסקאות שנבחנו ולא נכללו",
-  excludedReason: { too_far: "מחוץ לרדיוס", too_old: "מועד העסקה רחוק מהמועד הקובע", over_adjusted: "שונות רבה מהנכס – סך ההתאמות חורג מהמותר", outlier: "חריגה ממחירי השוק בסביבה", beyond_max: "דמיון נמוך יחסית; נכללו עסקאות דומות יותר" },
+  excludedReason: { too_far: "מחוץ לרדיוס", too_old: "מועד העסקה רחוק מהמועד הקובע", over_adjusted: "שונות רבה מהנכס – סך ההתאמות חורג מהמותר", outlier: "חריגה ממחירי השוק בסביבה", beyond_max: "דמיון נמוך יחסית; נכללו עסקאות דומות יותר", partial_sale: "מכירת חלק מהזכויות בנכס" },
   excludedNone: "לא נמצאו עסקאות נוספות ברדיוס הבדיקה.",
   dataAsking: "מחירי היצע (נתוני עזר)",
   askingIntro: (pairs: number, s2a: string, area: string) =>
@@ -144,6 +144,9 @@ const he = {
   disclaimerRealtor:
     "סקר מחירים בלבד. מתווך אינו רשאי לתת חוות דעת שמאית או הערכת שווי. מסמך זה אינו שומת מקרקעין (תקן 20).",
   demo: "נתוני הדגמה – עיר בדויה. אין במסמך זה נתונים אמיתיים.",
+  stagePreliminary: (done: number, total: number) =>
+    `דו״ח מקדמי: נתוני עסקאות מרשות המסים מתקבלים בימים אלה (${done} מתוך ${total} חיפושים הושלמו). הדו״ח הסופי יופק עם השלמת קבלת הנתונים, והשווי עשוי להשתנות.`,
+  stageFinal: (date: string) => `דו״ח סופי: מבוסס על נתוני עסקאות מרשות המסים שהתקבלו עד ${date}.`,
   docsIntro: "לצורך הכנת חוות הדעת עמדו לרשותי המסמכים הבאים:",
   docsNone: "לא הומצאו מסמכים. חוות הדעת מבוססת על נתונים שנמסרו ועל מאגרים ציבוריים.",
   docLine: (kind: string, date: string, name: string) => `${kind}${date ? ` מיום ${date}` : ""}${name ? ` (${name})` : ""}`,
@@ -239,7 +242,7 @@ const en: ReportText = {
   dataSelected: "Selected transactions",
   dataIntro: (n, months, r) => `Residential sales from the Tax Authority real-estate database were examined, from the ${months} months before the valuation date and within ${r} m of the property. The ${n} selected transactions and the adjustments made to each are listed below.`,
   dataExcluded: "Transactions examined and not included",
-  excludedReason: { too_far: "outside the radius", too_old: "too far from the valuation date", over_adjusted: "too dissimilar – total adjustments above the limit", outlier: "out of line with local prices", beyond_max: "less similar; closer comparables were used" },
+  excludedReason: { too_far: "outside the radius", too_old: "too far from the valuation date", over_adjusted: "too dissimilar – total adjustments above the limit", outlier: "out of line with local prices", beyond_max: "less similar; closer comparables were used", partial_sale: "sale of part of the rights" },
   excludedNone: "No further transactions were found within the search radius.",
   dataAsking: "Asking prices (supporting data)",
   askingIntro: (pairs, s2a, area) => `${pairs} nearby sales were matched to their own adverts. Sale prices were on average ${s2a} below the last asking price, and registered area was ${area} of advertised area.`,
@@ -280,6 +283,9 @@ const en: ReportText = {
   disclaimerBuyer: "This document is not a real estate appraisal and is not legal advice (Standard 20). It is an automated estimate based on public data and coefficients not yet calibrated. For a binding value, order an appraisal from a licensed real estate appraiser.",
   disclaimerRealtor: "Price survey only. A realtor may not give an appraisal opinion or valuation. This document is not an appraisal (Standard 20).",
   demo: "Demo data – a fictional town. This document contains no real data.",
+  stagePreliminary: (done: number, total: number) =>
+    `Preliminary report: Tax Authority deal records are being retrieved (${done} of ${total} searches done). The final report follows once they are in, and the value may change.`,
+  stageFinal: (date: string) => `Final report: based on Tax Authority deal records retrieved up to ${date}.`,
   docsIntro: "The following documents were available for this opinion:",
   docsNone: "No documents were provided. The opinion relies on the information given and on public databases.",
   docLine: (kind, date, name) => `${kind}${date ? ` dated ${date}` : ""}${name ? ` (${name})` : ""}`,

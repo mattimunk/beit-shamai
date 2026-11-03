@@ -87,7 +87,7 @@ export function scoreCandidate(
   if (Math.abs(deal.rooms - l.rooms) > 0.5) return null;
 
   // Floor must agree when both are known.
-  if (l.floor !== undefined && l.floor !== deal.floor) return null;
+  if (l.floor !== undefined && deal.floor !== undefined && l.floor !== deal.floor) return null;
 
   // Area: registered area is usually equal or smaller than advertised.
   const areaRatio = deal.area / l.area;
@@ -119,11 +119,15 @@ export function scoreCandidate(
     } else {
       return null;
     }
+  } else if (!deal.address.street && dist <= cfg.maxDistanceNoNumberM) {
+    // Registry export without an address: the parcel location places it in the same building.
+    score += 35;
+    reasons.push("same_building");
   } else if (!reasons.includes("parcel")) {
     return null;
   }
 
-  if (l.floor !== undefined) {
+  if (l.floor !== undefined && deal.floor !== undefined) {
     score += 20;
     reasons.push("floor");
   }

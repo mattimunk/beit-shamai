@@ -7,6 +7,11 @@
  *   POST /api/cases/:caseId/documents  upload one document (multipart: file, kind)
  *   GET  /api/cases/:caseId/documents  list a case's documents
  *   POST /api/valuate              { subject, date? }                  → ValuationResult
+ *   POST /api/requests             { subject } → request with its Tax Authority search plan
+ *   GET  /api/requests/:id         request status (preliminary / final) and plan
+ *   GET  /api/requests             open requests (inbox)                                   [admin]
+ *   POST /api/requests/:id/items/:itemId/upload   Tax Authority export for one search    [admin]
+ *   POST /api/tax/import           Tax Authority export without a request                 [admin]
  *   POST /api/deals/import         CSV or { source, rows } of completed deals              [admin]
  *   POST /api/listings/import      ImportRequest (licensed feeds)      → ImportResult      [admin]
  *   POST /api/jobs/:job            run a job now: deals | match | gtfs | cbs | renewal | backup [admin]
@@ -27,6 +32,20 @@ import { geocode } from "./connectors/geocode";
 import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
 import { importDeals, parseCsv } from "./dealsImport";
+import { importTaxExport, relocateUnlocated } from "./taxImport";
+import { createRequest, getRequest, listRequests, uploadToItem } from "./requests";
+
+/** An upload is either multipart (field "file") or the raw file as the body. */
+async function readUploadText(req: Request): Promise<string> {
+  const ct = req.headers.get("content-type") ?? "";
+  if (ct.includes("multipart/form-data")) {
+    const f = (await req.formData()).get("file");
+    if (!(f instanceof File)) throw new Error("file required");
+    if (f.size > 20 * 1024 * 1024) throw new Error("file too large");
+    return await f.text();
+  }
+  return await req.text();
+}
 
 async function importDealsFromCsv(db: ReturnType<typeof openDb>, req: Request, source: string) {
   return importDeals(db, parseCsv(await req.text()), source);
@@ -96,7 +115,32 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         }
         if (docRoute && req.method === "GET") return json(listDocuments(db, docRoute[1]!));
 
+        // Report requests: anyone may open one; its id is the capability to read it.
+        if (url.pathname === "/api/requests" && req.method === "POST") {
+          const b = (await req.json()) as { subject: Subject };
+          if (!b?.subject?.address?.city) return json({ error: "subject with city required" }, 400);
+          return json(createRequest(db, b.subject));
+        }
+        const reqRoute = url.pathname.match(/^\/api\/requests\/([0-9a-f-]{36})$/);
+        if (reqRoute && req.method === "GET") {
+          const r = getRequest(db, reqRoute[1]!);
+          return r ? json(r) : json({ error: "not found" }, 404);
+        }
+
         if (url.pathname.startsWith("/api/") && !isAdmin(req)) return json({ error: "unauthorised" }, 401);
+
+        if (url.pathname === "/api/requests" && req.method === "GET") {
+          return json(listRequests(db, url.searchParams.get("all") !== "1"));
+        }
+        const upRoute = url.pathname.match(/^\/api\/requests\/([0-9a-f-]{36})\/items\/([0-9a-f-]{36})\/upload$/);
+        if (upRoute && req.method === "POST") {
+          const text = await readUploadText(req);
+          return json(await uploadToItem(db, upRoute[1]!, upRoute[2]!, text, cfg.layers.parcels));
+        }
+        if (url.pathname === "/api/tax/import" && req.method === "POST") {
+          const text = await readUploadText(req);
+          return json(await runJob(db, "tax-import", "*", () => importTaxExport(db, text, cfg.layers.parcels)));
+        }
 
         if (url.pathname === "/api/deals/import" && req.method === "POST") {
           // CSV body (text/csv) or JSON { source, rows }
@@ -135,6 +179,8 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
               return json(await runJob(db, "cbs", "*", () => syncCbs(db, cfg.cities.map((c) => c.district), cfg.cbs.codes)));
             case "backup":
               return json(await runJob(db, "backup", "*", () => backup(db)));
+            case "relocate":
+              return json(await runJob(db, "relocate", "*", () => relocateUnlocated(db, cfg.layers.parcels)));
           }
         }
         if (url.pathname === "/api/pairs" && req.method === "GET") {

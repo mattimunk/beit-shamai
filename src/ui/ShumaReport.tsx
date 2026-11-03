@@ -28,9 +28,17 @@ const ADJ_KEYS = ["time", "floor", "age", "condition", "view", "new_build", "rig
  * and reasons, coefficients, lettered considerations, step-by-step calculation, the
  * conventional conclusion with the amount in words, and declaration / signature.
  */
+/** Where the Tax Authority data pull for this report stands (live reports only). */
+export interface ReportStage {
+  status: "preliminary" | "final";
+  done: number;
+  total: number;
+  finalAt?: string;
+}
+
 export function ShumaReport({
-  r, subject: s, tier, meta, docs, facts,
-}: { r: ValuationResult; subject: Subject; tier: Tier; meta: ReportMeta; docs: DocumentRecord[]; facts: DocumentFacts }) {
+  r, subject: s, tier, meta, docs, facts, stage,
+}: { r: ValuationResult; subject: Subject; tier: Tier; meta: ReportMeta; docs: DocumentRecord[]; facts: DocumentFacts; stage?: ReportStage }) {
   const { t, f, lang } = useT();
   const T = REPORT_TEXT[lang];
   const rightsWord = T.rights[s.rights];
@@ -190,7 +198,7 @@ export function ShumaReport({
                 <td><bdi>{x.deal.address.street} {x.deal.address.number}</bdi></td>
                 <td>{x.deal.parcel ? `${x.deal.parcel.block}/${x.deal.parcel.parcel}` : "—"}</td>
                 <td className="num">{x.deal.rooms}</td>
-                <td className="num">{x.deal.floor}</td>
+                <td className="num">{x.deal.floor ?? "—"}</td>
                 <td className="num">{x.deal.area}</td>
                 <td className="num">{f.int(x.deal.price)}</td>
                 <td className="num">{f.int(x.rawPpsqm)}</td>
@@ -353,6 +361,11 @@ export function ShumaReport({
         </div>
       </header>
       {r.dataSource.isDemo && <div className="demo-strip">{T.demo}</div>}
+      {stage && (
+        <div className={"stage-strip " + stage.status}>
+          {stage.status === "final" ? T.stageFinal(f.date((stage.finalAt ?? r.valuationDate).slice(0, 10))) : T.stagePreliminary(stage.done, stage.total)}
+        </div>
+      )}
 
       <section className="addressee">
         <p><b>{T.to}:</b> {meta.client}</p>

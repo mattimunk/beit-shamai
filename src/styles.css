@@ -303,3 +303,21 @@ html[lang="en"] .shuma { font-family: "Georgia", "Times New Roman", serif; }
 .file-name { color: #555; font-size: 12px; }
 .report-wrap { max-width: 100vw; }
 .shuma { overflow: hidden; }
+
+/* Data-request inbox */
+.inbox { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+.inbox-login { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
+.inbox-login .field { min-width: 240px; }
+.request-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.badge.preliminary { background: var(--c-warn-soft); color: var(--c-warn); }
+.badge.final { background: var(--c-accent-soft); color: var(--c-accent); }
+table.plan { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.plan th, table.plan td { padding: 6px 8px; border-bottom: 1px solid var(--c-line); text-align: start; vertical-align: top; }
+table.plan tr.st-done, table.plan tr.st-covered, table.plan tr.st-truncated { color: var(--c-ink-2); }
+table.plan tr.st-truncated td:not(:last-child) { text-decoration: line-through; }
+table.plan td.actions { white-space: nowrap; display: flex; gap: 6px; }
+label.button { cursor: pointer; display: inline-block; }
+.small { font-size: 12px; }
+.order-final { display: grid; gap: 6px; margin-top: 12px; }
+.stage-strip { border: 1px solid #ecd8b6; background: var(--c-warn-soft); color: var(--c-warn); padding: 6px 10px; margin: 8px 0; font-size: 13px; }
+.stage-strip.final { border-color: var(--c-line); background: transparent; color: var(--c-ink-2); }

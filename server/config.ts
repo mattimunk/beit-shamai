@@ -7,6 +7,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import type { ArcgisLayer } from "./connectors/arcgis";
+import type { ParcelLayer } from "./connectors/parcels";
 import type { District } from "./connectors/cbs";
 import type { CityPolicy, FutureLine } from "../src/engine/types";
 
@@ -25,6 +26,8 @@ export interface SourcesConfig {
   layers: {
     plans?: ArcgisLayer & { verify?: boolean };
     complexes?: ArcgisLayer & { verify?: boolean };
+    /** Cadastre layer for locating Tax Authority deals by block/parcel. */
+    parcels?: ParcelLayer & { verify?: boolean };
   };
   /** Curated by the methodology team: future lines with statutory status and stations. */
   futureLines: FutureLine[];

@@ -31,7 +31,7 @@ export interface ComparableResult {
 
 export interface ComparablesOutcome {
   used: ComparableResult[];
-  rejected: { deal: Deal; reason: "too_far" | "too_old" | "over_adjusted" | "outlier" | "beyond_max" }[];
+  rejected: { deal: Deal; reason: "too_far" | "too_old" | "over_adjusted" | "outlier" | "beyond_max" | "partial_sale" }[];
   radiusM: number;
   ppsqmMedian: number;
   ppsqmP25: number;
@@ -74,11 +74,12 @@ export function adjustComparable(
   const iNow = indexAt(index, valuationDate);
   if (iDeal && iNow) lines.push({ key: "time", pct: iNow / iDeal - 1 });
 
-  // Floor & elevator (registry rows do not say whether there is an elevator: assume as subject).
-  const elevatorKnown = deal.elevator !== undefined;
+  // Floor & elevator (registry rows lack the elevator and the Tax Authority export lacks the
+  // floor: assume as the subject and flag it).
+  const floorKnown = deal.floor !== undefined && deal.elevator !== undefined;
   const fl =
-    floorValue(subject.floor, subject.elevator, cfg) - floorValue(deal.floor, deal.elevator ?? subject.elevator, cfg);
-  if (fl !== 0 || !elevatorKnown) lines.push({ key: "floor", pct: fl, assumed: !elevatorKnown || undefined });
+    floorValue(subject.floor, subject.elevator, cfg) - floorValue(deal.floor ?? subject.floor, deal.elevator ?? subject.elevator, cfg);
+  if (fl !== 0 || !floorKnown) lines.push({ key: "floor", pct: fl, assumed: !floorKnown || undefined });
 
   // Building age (new-build premium handled separately). Unknown year → no adjustment, flagged.
   if (deal.yearBuilt && deal.yearBuilt > 1800) {
@@ -135,6 +136,10 @@ export function selectComparables(
   }));
 
   const fresh = enriched.filter((e) => {
+    if (e.deal.fractionSold !== undefined && e.deal.fractionSold < 0.999) {
+      rejected.push({ deal: e.deal, reason: "partial_sale" });
+      return false;
+    }
     if (e.ageMonths > c.maxMonths || e.ageMonths < 0) {
       rejected.push({ deal: e.deal, reason: "too_old" });
       return false;
@@ -168,7 +173,9 @@ export function selectComparables(
       Math.pow(0.5, e.ageMonths / c.recencyHalfMonths) *
       (1 - adj.gross / c.maxGrossAdjustment) *
       // similarity in size: penalise comps far from the subject's size
-      sizeSimilarity(e.deal.area, subjectAreaHint(subject));
+      sizeSimilarity(e.deal.area, subjectAreaHint(subject)) *
+      // pre-completion developer sales are a different market from an existing flat
+      (e.deal.offPlan && !subject.newBuild ? 0.4 : 1);
     candidates.push({
       deal: e.deal,
       distanceM: e.distanceM,

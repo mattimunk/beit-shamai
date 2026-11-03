@@ -118,7 +118,8 @@ export interface Deal {
   /** Area as registered / reported. Normalised to Standard 9.1 where possible. */
   area: number;
   rooms: number;
-  floor: number;
+  /** Not in the Tax Authority export: assumed like the subject and flagged. */
+  floor?: number;
   /** Unknown in some registry rows. */
   floorsInBuilding?: number;
   /** Unknown in registry rows: assumed like the subject and flagged. */
@@ -126,6 +127,12 @@ export interface Deal {
   /** Unknown in some registry rows: no age adjustment, flagged. */
   yearBuilt?: number;
   newBuild: boolean;
+  /** Sold by a developer before completion (year built after the sale year). */
+  offPlan?: boolean;
+  /** Share of the unit sold (Tax Authority "חלק נמכר"); below 1 = partial sale. */
+  fractionSold?: number;
+  /** Registry deal type ("מהות"), e.g. "דירה בבית קומות", "דירת גן". */
+  kind?: string;
   condition?: Condition;
   rights?: RightsType;
   view?: ViewQuality;
