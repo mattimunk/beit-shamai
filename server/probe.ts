@@ -112,34 +112,19 @@ await check("OCR tools (printed Madlan / Yad2 pages)", async () => {
   return "pdftoppm, tesseract (heb+eng) and ImageMagick present";
 });
 
-// Parcel (גוש/חלקה) layer – needed to place Tax Authority export rows, which carry no address.
-if (!cfg.layers.parcels) {
-  await check("Parcel layer discovery (for Tax Authority exports)", async () => {
-    const roots = ["https://ags.iplan.gov.il/arcgisiplan/rest/services", "https://open.govmap.gov.il/arcgis/rest/services"];
-    const found: string[] = [];
-    for (const root of roots) {
-      const walk = async (url: string, depth: number): Promise<void> => {
-        if (depth > 2 || found.length > 15) return;
-        const r = await fetch(`${url}?f=json`, { signal: AbortSignal.timeout(15_000) }).catch(() => null);
-        if (!r?.ok) return;
-        const j: any = await r.json().catch(() => ({}));
-        for (const f of j.folders ?? []) await walk(`${root}/${f}`, depth + 1);
-        for (const s of j.services ?? []) {
-          if (!/MapServer|FeatureServer/.test(s.type)) continue;
-          const su = `${root}/${s.name}/${s.type}`;
-          const sj: any = await (await fetch(`${su}?f=json`, { signal: AbortSignal.timeout(15_000) }).catch(() => null))?.json().catch(() => ({}));
-          for (const l of sj?.layers ?? []) {
-            if (/חלק|גוש|parcel|cadast|kadast/i.test(`${l.name} ${s.name}`)) found.push(`${su}/${l.id}  (${l.name})`);
-          }
-        }
-      };
-      await walk(root, 0);
-    }
-    save("parcel-layers", found);
-    if (!found.length) throw new Error("no parcel layer found – deals will be placed at the city centre and flagged");
-    return `candidates:\n      ${found.join("\n      ")}\n      → send these over and I'll pin the right one`;
-  });
-}
+// National parcel layer (data.gov.il) – places Tax Authority deals, which have no address.
+await check("Parcel layer (Survey of Israel, data.gov.il)", async () => {
+  const { openDb } = await import("./db");
+  const { ensureParcelPoints, PARCELS_URL } = await import("./connectors/parcelsOpen");
+  const db = openDb();
+  ensureParcelPoints(db);
+  const n = (db.query(`SELECT COUNT(*) AS n FROM parcel_points`).get() as { n: number }).n;
+  if (n > 0) return `${n.toLocaleString("en")} parcels loaded`;
+  const res = await fetch(PARCELS_URL, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`data.gov.il download HTTP ${res.status}`);
+  const mb = Number(res.headers.get("content-length") ?? 0) / 1e6;
+  return `not loaded yet; download reachable${mb ? ` (${mb.toFixed(0)} MB)` : ""} → run: bun run server/importParcels.ts`;
+});
 
 console.log("\nSource check\n" + "-".repeat(60));
 for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.source}\n      ${r.note}`);

@@ -6,6 +6,8 @@ import {
   dealsNear, listingsNear, recordJob, replacePairs, replaceStops, savePriceIndex, upsertDeals, upsertSignals,
 } from "./db";
 import { downloadGtfs, parseGtfs } from "./connectors/gtfs";
+import { syncParcels } from "./connectors/parcelsOpen";
+import { relocateUnlocated } from "./taxImport";
 import { fetchDistrictIndex, type District } from "./connectors/cbs";
 import { fetchRenewalSignals } from "./connectors/renewal";
 import type { CityConfig, SourcesConfig } from "./config";
@@ -63,6 +65,13 @@ export function rematch(db: Database, area: { lat: number; lng: number; radiusM:
   const { pairs, unmatchedDeals } = matchListingsToDeals(deals, listings);
   replacePairs(db, pairs, deals.map((d) => d.id));
   return { deals: deals.length, listings: listings.length, pairs: pairs.length, unmatched: unmatchedDeals.length };
+}
+
+/** Monthly: the national parcel layer, then place any Tax Authority deals still waiting. */
+export async function syncParcelLayer(db: Database, dir = process.env.DATA_DIR ?? "data", url?: string) {
+  const r = await syncParcels(db, `${dir}/parcels`, url, (s) => console.log(`[parcels] ${s}`));
+  const placed = await relocateUnlocated(db, undefined);
+  return { ...r, dealsPlaced: placed.placed, dealsWaiting: placed.waiting };
 }
 
 /** Weekly: download the national GTFS and recompute stops with peak frequencies. */

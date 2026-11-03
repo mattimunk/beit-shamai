@@ -133,3 +133,24 @@ describe("data requests", () => {
     expect(req2.status).toBe("final");
   });
 });
+
+describe("national parcel layer", () => {
+  test("shapefile in a ZIP → one point per parcel and per block; deals placed from it", async () => {
+    const { importParcelZip, parcelPoint } = await import("../server/connectors/parcelsOpen");
+    const db = openDb(":memory:");
+    const r = await importParcelZip(db, new URL("./fixtures/parcels-mini.zip", import.meta.url).pathname);
+    expect(r).toMatchObject({ parcels: 3, blocks: 2, blockField: "GUSH_NUM", parcelField: "PARCEL" });
+    const p = parcelPoint(db, "6625", "869")!;
+    expect(p.approx).toBe(false);
+    expect(p.lat).toBeGreaterThan(32.0);
+    expect(p.lat).toBeLessThan(32.15);
+    expect(p.lng).toBeGreaterThan(34.7);
+    expect(p.lng).toBeLessThan(34.85);
+    expect(parcelPoint(db, "6625", "999")!.approx).toBe(true); // unknown parcel → block centre
+    expect(parcelPoint(db, "1", "1")).toBeNull();
+    // A Tax Authority export imported with no ArcGIS layer is placed from the local points.
+    const imp = await importTaxExport(db, SAMPLE, undefined);
+    expect(imp.stored).toBe(3); // the three sales in block 6625; the other blocks are not in the mini layer
+    expect(imp.unlocated).toBe(3);
+  });
+});

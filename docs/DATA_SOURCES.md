@@ -32,16 +32,19 @@ The system never stores or uses that login.
 4. **Checks on upload.** The file's own header is read back: city, dates and area band must
    match the search, or the search stays open (rows are kept). An export at the 150 limit is
    marked *cut off* and split in two: by period while longer than a month, then by area.
-5. **Rows → deals.** Each row has block/parcel but no address; it is placed on the map through
-   the parcel layer (`layers.parcels` in config: `url`, `wkid`, `blockField`, `parcelField`),
-   falling back to the block centre (flagged). Without a parcel layer, rows wait in
-   `unlocated_deals` until `POST /api/jobs/relocate` runs. Partial sales (חלק נמכר < 1) are
+5. **Rows → deals.** Each row has block/parcel but no address. It is placed from the Survey
+   of Israel's national parcel layer (open licence, data.gov.il dataset
+   `dff8a168-af6c-4e0f-bbe3-c4bd3646084c`, ~640 MB Shapefile, monthly), imported into
+   `parcel_points` / `block_points` by the monthly `parcels` job or by hand with
+   `bun run server/importParcels.ts`. An unknown parcel falls back to its block's centre
+   (flagged). An ArcGIS layer (`layers.parcels`) can be configured as a further fallback. Rows
+   that cannot be placed wait in `unlocated_deals`, and are placed after the next import. Partial sales (חלק נמכר < 1) are
    excluded as comparables; sales in buildings completed after the sale date are treated as
    off-plan and weighted at 0.4 for second-hand subjects. The floor is not in the export, so it
    is assumed equal to the subject's and flagged.
 6. **Final.** When every search is done or covered, the request and report become *final*.
 
-`server/probe.ts` lists candidate parcel layers if none is configured.
+`server/probe.ts` reports whether the parcel layer is loaded.
 
 ## Madlan / Yad2 adverts: printed pages per case
 

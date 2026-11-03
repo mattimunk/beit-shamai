@@ -7,6 +7,7 @@
  *   weekly   (gtfsDay):       GTFS stops and peak frequencies
  *   weekly   (renewalDay):    renewal complexes and plans per city
  *   monthly  (cbsDayOfMonth): CBS district price index
+ *   monthly:                  national parcel layer (data.gov.il), for placing Tax Authority deals
  *
  * A failing source is recorded and retried at the next tick after 6 hours, without blocking
  * the other jobs.
@@ -14,7 +15,7 @@
 import type { Database } from "bun:sqlite";
 import type { SourcesConfig } from "./config";
 import { lastRun } from "./db";
-import { backup, rematch, runJob, syncCbs, syncDeals, syncGtfs, syncRenewal } from "./jobs";
+import { backup, rematch, runJob, syncCbs, syncDeals, syncGtfs, syncParcelLayer, syncRenewal } from "./jobs";
 
 const H = 3_600_000;
 
@@ -62,6 +63,7 @@ export async function tick(db: Database, cfg: SourcesConfig, now = new Date(), l
   if (cfg.cities.length && due("cbs", "*", { everyHours: 24 * 27, dayOfMonth: s.cbsDayOfMonth })) {
     await attempt("cbs", "*", () => syncCbs(db, cfg.cities.map((c) => c.district), cfg.cbs.codes));
   }
+  if (due("parcels", "*", { everyHours: 24 * 27, atHourUtc: 1 })) await attempt("parcels", "*", () => syncParcelLayer(db));
   if (due("backup", "*", { everyHours: 24, atHourUtc: s.backupHourUtc })) await attempt("backup", "*", () => backup(db));
 }
 

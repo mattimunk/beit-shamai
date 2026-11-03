@@ -7,6 +7,7 @@
 import type { Database } from "bun:sqlite";
 import { centroid, type ArcgisLayer } from "./arcgis";
 import { itmToWgs84 } from "../itm";
+import { parcelPoint } from "./parcelsOpen";
 
 export interface ParcelLayer extends ArcgisLayer {
   blockField: string; // e.g. "GUSH_NUM"
@@ -28,6 +29,9 @@ export async function locateParcel(
   const key = `${block}-${parcel}`;
   const hit: any = db.query(`SELECT lat, lng, approx FROM parcel_cache WHERE key = ?`).get(key);
   if (hit) return { lat: hit.lat, lng: hit.lng, approx: !!hit.approx };
+  // The national parcel layer imported from data.gov.il (job "parcels") comes first.
+  const local = parcelPoint(db, block, parcel);
+  if (local && (!local.approx || !layer)) return local;
   if (!layer) return null;
 
   const q = async (where: string) => {

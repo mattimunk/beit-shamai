@@ -75,6 +75,15 @@ export async function listZip(path: string): Promise<ZipEntry[]> {
   return entries;
 }
 
+/** Stream an entry's raw (decompressed) bytes. */
+export async function* zipBytes(path: string, entry: ZipEntry): AsyncGenerator<Uint8Array> {
+  const lh = await readBytes(path, entry.localHeaderOffset, entry.localHeaderOffset + 30);
+  const dataStart = entry.localHeaderOffset + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+  const raw = Readable.fromWeb(Bun.file(path).slice(dataStart, dataStart + entry.compressedSize).stream() as any);
+  const stream = entry.method === 8 ? raw.pipe(createInflateRaw()) : raw;
+  for await (const chunk of stream) yield chunk as Uint8Array;
+}
+
 /** Stream an entry's text line by line. */
 export async function* zipLines(path: string, entry: ZipEntry): AsyncGenerator<string> {
   const lh = await readBytes(path, entry.localHeaderOffset, entry.localHeaderOffset + 30);

@@ -90,14 +90,18 @@ export async function geocode(q: string, fetchImpl: typeof fetch = fetch): Promi
     if (!res.ok) throw new Error(`Google geocoding ${res.status}`);
     hits = parseGoogle(await res.json());
   } else {
+    // Nominatim refuses anonymous callers: its policy asks for a real contact.
+    const contact = process.env.CONTACT_EMAIL?.trim();
+    if (!contact || !contact.includes("@")) throw new Error("address search needs CONTACT_EMAIL (or GOOGLE_MAPS_API_KEY) in .env");
     // Respect Nominatim's 1 request/second policy.
     const wait = 1100 - (Date.now() - lastNominatim);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     lastNominatim = Date.now();
     const u = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&countrycodes=il&limit=6&addressdetails=1&accept-language=he`;
     const res = await fetchImpl(u, {
-      headers: { "user-agent": `BeitShamai/0.1 (${process.env.CONTACT_EMAIL ?? "admin@example.com"})`, accept: "application/json" },
+      headers: { "user-agent": `BeitShamai/0.1 (${contact})`, "from": contact, accept: "application/json" },
     });
+    if (res.status === 403) throw new Error("Nominatim 403: blocked – check CONTACT_EMAIL in .env; blocks lift by themselves within a day");
     if (!res.ok) throw new Error(`Nominatim ${res.status}`);
     hits = parseNominatim(await res.json());
   }

@@ -27,7 +27,7 @@ import type { Subject } from "../src/engine/types";
 import { valuate, type ValuationFacts } from "../src/engine/valuation";
 import { lastRun, openDb, pairsNear } from "./db";
 import { importFeed, type ImportRequest } from "./ledger";
-import { backup, rematch, runJob, syncCbs, syncDeals, syncGtfs, syncRenewal } from "./jobs";
+import { backup, rematch, runJob, syncCbs, syncDeals, syncGtfs, syncParcelLayer, syncRenewal } from "./jobs";
 import { SqliteProvider } from "./sqliteProvider";
 import { loadSources, type SourcesConfig } from "./config";
 import { geocode } from "./connectors/geocode";
@@ -198,6 +198,8 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
               return json(await runJob(db, "cbs", "*", () => syncCbs(db, cfg.cities.map((c) => c.district), cfg.cbs.codes)));
             case "backup":
               return json(await runJob(db, "backup", "*", () => backup(db)));
+            case "parcels":
+              return json(await runJob(db, "parcels", "*", () => syncParcelLayer(db)));
             case "relocate":
               return json(await runJob(db, "relocate", "*", () => relocateUnlocated(db, cfg.layers.parcels)));
           }
