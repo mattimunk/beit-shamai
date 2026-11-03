@@ -8,6 +8,10 @@ RUN bun test && bun run build
 
 FROM oven/bun:1 AS runtime
 WORKDIR /app
+# OCR for printed Madlan / Yad2 pages: page rendering, Hebrew OCR, strike-through removal.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-heb tesseract-ocr-eng imagemagick \
+ && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production \
     PORT=8787 \
     DB_PATH=/data/beit-shamai.sqlite \

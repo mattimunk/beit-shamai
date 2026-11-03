@@ -31,11 +31,11 @@ export async function searchAddress(q: string): Promise<GeocodeHit[]> {
   return r.json();
 }
 
-export async function valuateRemote(subject: Subject, facts: ValuationFacts = {}, date?: string): Promise<ValuationResult> {
+export async function valuateRemote(subject: Subject, facts: ValuationFacts = {}, date?: string, caseId?: string): Promise<ValuationResult> {
   const r = await fetch("/api/valuate", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ subject, facts, date }),
+    body: JSON.stringify({ subject, facts, date, caseId }),
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j?.error ?? `valuate ${r.status}`);
@@ -95,4 +95,17 @@ export async function uploadTaxExport(token: string, requestId: string, itemId: 
 export function requestProgress(r: RequestDto) {
   const live = r.items.filter((i) => i.status !== "truncated");
   return { done: live.filter((i) => i.status !== "pending").length, total: live.length };
+}
+
+/** Upload a Madlan/Yad2 print-to-PDF for the case; the server reads the adverts on it. */
+export async function uploadAdvertPrint(caseId: string, file: File, city: string) {
+  const form = new FormData();
+  form.append("file", file);
+  const r = await fetch(`/api/cases/${encodeURIComponent(caseId)}/adverts?city=${encodeURIComponent(city)}`, { method: "POST", body: form });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error ?? `adverts ${r.status}`);
+  return j as {
+    print: { source: string; pages: number; city?: string; printedAt?: string };
+    adverts: { card: { price: number; previousPrice?: number; rooms?: number; floor?: number; area?: number; street?: string; number?: string; neighbourhood?: string }; used: boolean; reason?: string }[];
+  };
 }

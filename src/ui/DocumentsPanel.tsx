@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { DOC_FIELDS, guessKind, type DocKind, type DocumentRecord } from "../data/documents";
-import { uploadDocument } from "../data/apiClient";
+import { uploadAdvertPrint, uploadDocument } from "../data/apiClient";
 import { useT } from "./context";
 
 const KINDS = Object.keys(DOC_FIELDS) as DocKind[];
@@ -10,16 +10,42 @@ export function DocumentsPanel({
   onChange,
   live,
   caseId,
+  city,
 }: {
   docs: DocumentRecord[];
   onChange: (d: DocumentRecord[]) => void;
   live: boolean;
   caseId: string;
+  city: string;
 }) {
   const { t } = useT();
   const T = t.docs;
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
+
+  // Latest list, so async updates from several uploads don't overwrite each other.
+  const latest = useRef(docs);
+  latest.current = docs;
+  const patch = (id: string, p: Partial<DocumentRecord>) => {
+    latest.current = latest.current.map((d) => (d.id === id ? { ...d, ...p } : d));
+    onChange(latest.current);
+  };
+
+  const readAdverts = async (d: DocumentRecord, file?: File) => {
+    try {
+      const f = file ?? new File([await (await fetch(d.url!)).blob()], d.fileName, { type: "application/pdf" });
+      patch(d.id, { adverts: { read: 0, used: 0, status: "reading" } });
+      const out = await uploadAdvertPrint(caseId, f, city);
+      const rows = out.adverts.map((a) => ({
+        price: a.card.price, previousPrice: a.card.previousPrice, rooms: a.card.rooms, floor: a.card.floor, area: a.card.area,
+        address: [a.card.street, a.card.number].filter(Boolean).join(" ") + (a.card.neighbourhood ? `, ${a.card.neighbourhood}` : ""),
+        used: a.used, reason: a.reason,
+      }));
+      patch(d.id, { serverId: d.serverId ?? "advert", adverts: { read: rows.length, used: rows.filter((r) => r.used).length, status: "done", rows } });
+    } catch (e) {
+      patch(d.id, { adverts: { read: 0, used: 0, status: "error", error: (e as Error).message } });
+    }
+  };
 
   const addFiles = async (files: FileList | File[]) => {
     const added: DocumentRecord[] = Array.from(files).map((file) => ({
@@ -32,16 +58,19 @@ export function DocumentsPanel({
       fields: {},
       url: URL.createObjectURL(file),
     }));
-    let next = [...docs, ...added];
-    onChange(next);
+    latest.current = [...docs, ...added];
+    onChange(latest.current);
     if (live) {
       // Store on the server in the background; mark each when done.
       const files2 = Array.from(files);
       for (let i = 0; i < added.length; i++) {
+        if (added[i]!.kind === "advert_print" && /\.pdf$/i.test(added[i]!.fileName)) {
+          await readAdverts(added[i]!, files2[i]!);
+          continue;
+        }
         try {
           const serverId = await uploadDocument(caseId, files2[i]!, added[i]!.kind);
-          next = next.map((d) => (d.id === added[i]!.id ? { ...d, serverId } : d));
-          onChange(next);
+          patch(added[i]!.id, { serverId });
         } catch {
           /* leave as local-only; the row shows no "stored" badge */
         }
@@ -93,6 +122,32 @@ export function DocumentsPanel({
             {d.serverId && <span className="badge conf-high small">{T.uploaded}</span>}
             <button type="button" className="icon" aria-label={t.remove} title={t.remove} onClick={() => { if (d.url) URL.revokeObjectURL(d.url); onChange(docs.filter((x) => x.id !== d.id)); }}>×</button>
           </div>
+          {d.kind === "advert_print" && (
+            <div className="adverts">
+              {!live && <p className="small muted">{T.advDemo}</p>}
+              {live && !d.adverts && d.url && <button type="button" className="ghost" onClick={() => readAdverts(d)}>{T.advRead}</button>}
+              {d.adverts?.status === "reading" && <p className="small muted">{T.advReading}</p>}
+              {d.adverts?.status === "error" && <p className="small warnings">{d.adverts.error}</p>}
+              {d.adverts?.status === "done" && (
+                <>
+                  <p className="small">{T.advDone(d.adverts.read, d.adverts.used)}</p>
+                  <table className="adv-table small">
+                    <thead><tr><th>{T.advCols.price}</th><th>{T.advCols.rooms}</th><th>{T.advCols.floor}</th><th>{T.advCols.area}</th><th>{T.advCols.address}</th><th>{T.advCols.status}</th></tr></thead>
+                    <tbody>
+                      {d.adverts.rows!.map((r, i) => (
+                        <tr key={i} className={r.used ? "" : "muted"}>
+                          <td><bdi>{r.price.toLocaleString("en")}</bdi>{r.previousPrice && <div className="small">{T.advDrop(r.previousPrice)}</div>}</td>
+                          <td>{r.rooms ?? "—"}</td><td>{r.floor ?? "—"}</td><td>{r.area ?? "—"}</td>
+                          <td><bdi>{r.address || "—"}</bdi></td>
+                          <td title={r.reason}>{r.used ? "✓" : <span className="small">{r.reason}</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </div>
+          )}
           <div className="grid">
             {DOC_FIELDS[d.kind].map((fd) => {
               const v = d.fields[fd.key];

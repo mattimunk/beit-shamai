@@ -9,10 +9,10 @@ import { mkdirSync } from "node:fs";
 export const MAX_BYTES = 25 * 1024 * 1024;
 const ALLOWED = /^(application\/pdf|image\/(jpeg|png|heic|webp)|application\/(msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document)|application\/octet-stream)$/;
 
-export async function storeDocument(db: Database, caseId: string, req: Request): Promise<[unknown, number]> {
+export async function storeDocument(db: Database, caseId: string, req: Request, forceKind?: string): Promise<[unknown, number]> {
   const form = await req.formData();
   const file = form.get("file");
-  const kind = String(form.get("kind") ?? "other").replace(/[^a-z0-9_]/g, "").slice(0, 30) || "other";
+  const kind = String(forceKind ?? form.get("kind") ?? "other").replace(/[^a-z0-9_]/g, "").slice(0, 30) || "other";
   if (!(file instanceof File)) return [{ error: "file required" }, 400];
   if (file.size > MAX_BYTES) return [{ error: "file too large (25 MB max)" }, 413];
   if (file.type && !ALLOWED.test(file.type)) return [{ error: `file type not accepted: ${file.type}` }, 415];

@@ -321,3 +321,9 @@ label.button { cursor: pointer; display: inline-block; }
 .order-final { display: grid; gap: 6px; margin-top: 12px; }
 .stage-strip { border: 1px solid #ecd8b6; background: var(--c-warn-soft); color: var(--c-warn); padding: 6px 10px; margin: 8px 0; font-size: 13px; }
 .stage-strip.final { border-color: var(--c-line); background: transparent; color: var(--c-ink-2); }
+
+/* Printed adverts read from a case PDF */
+.adverts { margin-top: 6px; }
+.adv-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.adv-table th, .adv-table td { padding: 3px 4px; border-bottom: 1px solid var(--c-line); text-align: start; vertical-align: top; }
+.adv-table tr.muted td { color: var(--c-ink-3, #8a8a8a); }

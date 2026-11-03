@@ -43,4 +43,30 @@ The system never stores or uses that login.
 
 `server/probe.ts` lists candidate parcel layers if none is configured.
 
+## Madlan / Yad2 adverts: printed pages per case
+
+The client (or realtor) opens the site's search for the property's area, prints the results
+page to PDF and uploads it in the documents section (kind "Printed adverts"). The server reads
+it with OCR and uses the adverts as asking-price evidence **for that case only**. Nothing is
+pooled into a shared listings database, which would need a licence from the sites.
+
+- Printed pages usually have no usable text (Windows print drivers turn web fonts into Type 3
+  glyphs without a character map), so every page is rendered (`pdftoppm`) and read with
+  `tesseract` (Hebrew + English) plus a digits-only pass for prices.
+- Layouts: Madlan prints price then details below; Yad2 prints street, type/neighbourhood/city,
+  rooms·floor·m², feature tags, and the price at the bottom. Both are handled.
+- Price drops: a crossed-out old price beside the current one is re-read at double resolution
+  with the strike line erased (ImageMagick) and stored as price history.
+- Yad2's font draws a flat-topped 3 that OCR reads as 5; each "5" is checked against the image
+  (a real 5 has a stroke on the upper left).
+- Excluded automatically: whole buildings, plots and shops; new-project "starting from" prices;
+  cards with rooms, area or address unread; implausible price per m². Each card is placed on the
+  map by address before use.
+- Accuracy on the first two samples (Nov 2026): Madlan 32 cards / 19 pages, Yad2 39 / 12 pages,
+  about 40–60 s per file. Around a quarter of cards miss a field (and are left out); occasional
+  digit slips (80 → 88 m²) are not caught automatically, so the table is shown for review.
+
+Server needs `poppler-utils tesseract-ocr tesseract-ocr-heb imagemagick` (in the Docker image);
+the source check reports whether they are present.
+
 Not yet in the interface: the land-registry extract (נסח טאבו, paid, user-initiated), municipal building files and permit plans (for the plan-comparison phase), and published appraisals (decisive-appraiser decisions, agreed levy appraisals) for calibration.

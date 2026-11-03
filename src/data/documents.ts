@@ -23,6 +23,7 @@ export type DocKind =
   | "engineer_report"
   | "prior_appraisal"
   | "photos"
+  | "advert_print"
   | "other";
 
 export type FieldType = "date" | "money" | "number" | "text" | "bool" | "rights" | "planType";
@@ -74,6 +75,7 @@ export const DOC_FIELDS: Record<DocKind, { key: string; type: FieldType }[]> = {
     { key: "notes", type: "text" },
   ],
   photos: [{ key: "notes", type: "text" }],
+  advert_print: [],
   other: [{ key: "notes", type: "text" }],
 };
 
@@ -89,11 +91,16 @@ export interface DocumentRecord {
   url?: string;
   /** Set once stored on the server. */
   serverId?: string;
+  /** For printed Madlan/Yad2 pages: what the server read from them. */
+  adverts?: { read: number; used: number; status: "reading" | "done" | "error"; error?: string; rows?: AdvertRow[] };
 }
+
+export interface AdvertRow { price: number; previousPrice?: number; rooms?: number; floor?: number; area?: number; address: string; used: boolean; reason?: string }
 
 /** Guess the kind from the file name (Hebrew or English). */
 export function guessKind(name: string): DocKind {
   const n = name.toLowerCase();
+  if (/madlan|yad2|מדלן|יד ?2|למכירה|דירות מחכות/.test(n)) return "advert_print";
   if (/נסח|טאבו|tabu|registry|nesach/.test(n)) return "tabu";
   if (/שכירות|שכ"ד|rent|lease/.test(n)) return "rental_contract";
   if (/חוזה|הסכם|contract|purchase|מכר/.test(n)) return "purchase_contract";

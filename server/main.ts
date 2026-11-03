@@ -6,7 +6,9 @@
  *   GET  /api/geocode?q=...        address search (GovMap)
  *   POST /api/cases/:caseId/documents  upload one document (multipart: file, kind)
  *   GET  /api/cases/:caseId/documents  list a case's documents
- *   POST /api/valuate              { subject, date? }                  → ValuationResult
+ *   POST /api/valuate              { subject, facts?, date?, caseId? } → ValuationResult
+ *   POST /api/cases/:caseId/adverts   Madlan/Yad2 print-to-PDF (multipart: file) → cards read
+ *   GET  /api/cases/:caseId/adverts   the case's adverts and whether each is used
  *   POST /api/requests             { subject } → request with its Tax Authority search plan
  *   GET  /api/requests/:id         request status (preliminary / final) and plan
  *   GET  /api/requests             open requests (inbox)                                   [admin]
@@ -31,6 +33,7 @@ import { loadSources, type SourcesConfig } from "./config";
 import { geocode } from "./connectors/geocode";
 import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
+import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts";
 import { importDeals, parseCsv } from "./dealsImport";
 import { importTaxExport, relocateUnlocated } from "./taxImport";
 import { createRequest, getRequest, listRequests, uploadToItem } from "./requests";
@@ -102,10 +105,26 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         }
 
         if (url.pathname === "/api/valuate" && req.method === "POST") {
-          const body = (await req.json()) as { subject: Subject; facts?: ValuationFacts; date?: string };
+          const body = (await req.json()) as { subject: Subject; facts?: ValuationFacts; date?: string; caseId?: string };
           if (!body?.subject?.location) return json({ error: "subject with location required" }, 400);
           const date = body.date ?? new Date().toISOString().slice(0, 10);
-          return json(await valuate(body.subject, provider, date, body.facts ?? {}));
+          const facts: ValuationFacts = { ...(body.facts ?? {}) };
+          if (body.caseId && /^[A-Za-z0-9-]{16,64}$/.test(body.caseId)) facts.caseListings = caseListings(db, body.caseId, body.subject.address.city);
+          return json(await valuate(body.subject, provider, date, facts));
+        }
+
+        const advRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/adverts$/);
+        if (advRoute) {
+          const caseId = advRoute[1]!;
+          if (req.method === "GET") return json(listCaseAdverts(db, caseId));
+          if (req.method === "POST") {
+            const city = url.searchParams.get("city") ?? undefined;
+            const [stored, code] = await storeDocument(db, caseId, req, "advert_print");
+            if (code !== 200) return json(stored, code);
+            const doc = db.query(`SELECT path FROM documents WHERE id = ?`).get((stored as { id: string }).id) as { path: string };
+            if (!/\.pdf$/i.test(doc.path)) return json({ error: "a PDF printed from Madlan or Yad2 is required" }, 415);
+            return json(await importAdvertPrint(db, caseId, (stored as { id: string }).id, doc.path, city));
+          }
         }
 
         const docRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/documents$/);

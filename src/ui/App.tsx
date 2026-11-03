@@ -108,7 +108,7 @@ export function App() {
       setBusy(true);
       try {
         const vf = { rentMonthly: facts.rentMonthly, contractSales: facts.contractSales };
-        const r = live ? await valuateRemote(effective, vf) : await valuate(effective, provider, DEMO_VALUATION_DATE, vf);
+        const r = live ? await valuateRemote(effective, vf, undefined, caseId) : await valuate(effective, provider, DEMO_VALUATION_DATE, vf);
         if (!cancelled) {
           setResult(r);
           setError(null);
@@ -174,7 +174,7 @@ export function App() {
             <aside className="inputs no-print">
               <h2>{t.inputs}</h2>
               <PropertyForm subject={effective} onChange={setSubject} live={live} />
-              <DocumentsPanel docs={docs} onChange={setDocs} live={live} caseId={caseId} />
+              <DocumentsPanel docs={docs} onChange={setDocs} live={live} caseId={caseId} city={effective.address.city} />
             </aside>
             <div className="results">
               {busy && !result && <div className="card muted">{t.loading}</div>}

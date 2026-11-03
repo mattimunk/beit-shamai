@@ -98,6 +98,20 @@ for (const [name, layer] of Object.entries(cfg.layers)) {
   });
 }
 
+await check("OCR tools (printed Madlan / Yad2 pages)", async () => {
+  const ver = async (cmd: string[]) => {
+    const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+    const out = (await new Response(p.stdout).text()) + (await new Response(p.stderr).text());
+    if ((await p.exited) !== 0) throw new Error(`${cmd[0]} missing`);
+    return out;
+  };
+  await ver(["pdftoppm", "-v"]);
+  await ver(["convert", "-version"]);
+  const langs = await ver(["tesseract", "--list-langs"]);
+  if (!/\bheb\b/.test(langs)) throw new Error("tesseract Hebrew model (heb) missing");
+  return "pdftoppm, tesseract (heb+eng) and ImageMagick present";
+});
+
 // Parcel (גוש/חלקה) layer – needed to place Tax Authority export rows, which carry no address.
 if (!cfg.layers.parcels) {
   await check("Parcel layer discovery (for Tax Authority exports)", async () => {

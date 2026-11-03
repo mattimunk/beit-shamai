@@ -195,7 +195,7 @@ const he = {
     kind: {
       tabu: "נסח טאבו", purchase_contract: "חוזה רכישה", rental_contract: "חוזה שכירות", floor_plan: "תוכנית / תשריט",
       building_permit: "היתר בנייה", form4: "טופס 4 / תעודת גמר", arnona: "חשבון ארנונה", condo_order: "צו / תשריט בית משותף",
-      engineer_report: "חוות דעת מהנדס / בדק בית", prior_appraisal: "שומה קודמת", photos: "תמונות", other: "אחר",
+      engineer_report: "חוות דעת מהנדס / בדק בית", prior_appraisal: "שומה קודמת", photos: "תמונות", advert_print: "מודעות מודפסות (מדלן / יד2)", other: "אחר",
     },
     field: {
       date: "תאריך", endDate: "תאריך סיום", rights: "סוג זכות", block: "גוש", parcel: "חלקה", subParcel: "תת-חלקה",
@@ -205,6 +205,12 @@ const he = {
     planType: { permit: "תוכנית היתר", sale: "תוכנית מכר", condo: "תשריט בית משותף", other: "אחר" },
     open: "פתיחה",
     uploaded: "נשמר בשרת",
+    advReading: "קורא את המודעות… (כחצי דקה לכל 10 עמודים)",
+    advDone: (read: number, used: number) => `נקראו ${read} מודעות, ${used} נכללו בהשוואה כמחירי היצע.`,
+    advDemo: "קריאת מודעות מודפסות פועלת בשרת בלבד (מצב נתונים חיים).",
+    advRead: "קריאת המודעות",
+    advCols: { price: "מחיר מבוקש", rooms: "חד׳", floor: "קומה", area: "מ״ר", address: "כתובת", status: "בשימוש" },
+    advDrop: (from: number) => `ירד מ-${from.toLocaleString("he-IL")}`,
     applied: "נתוני הנסח עודכנו בפרטי הנכס",
   },
   addressSearch: "חיפוש כתובת",
@@ -449,7 +455,7 @@ const en: Strings = {
     kind: {
       tabu: "Land registry extract", purchase_contract: "Purchase contract", rental_contract: "Rental contract", floor_plan: "Floor plan",
       building_permit: "Building permit", form4: "Form 4 / completion certificate", arnona: "Arnona bill", condo_order: "Condominium order / plan",
-      engineer_report: "Engineer / inspection report", prior_appraisal: "Previous appraisal", photos: "Photos", other: "Other",
+      engineer_report: "Engineer / inspection report", prior_appraisal: "Previous appraisal", photos: "Photos", advert_print: "Printed adverts (Madlan / Yad2)", other: "Other",
     },
     field: {
       date: "Date", endDate: "End date", rights: "Rights", block: "Block", parcel: "Parcel", subParcel: "Sub-parcel",
@@ -459,6 +465,12 @@ const en: Strings = {
     planType: { permit: "Permit plan", sale: "Sale plan", condo: "Condominium plan", other: "Other" },
     open: "Open",
     uploaded: "Stored on server",
+    advReading: "Reading the adverts… (about half a minute per 10 pages)",
+    advDone: (read: number, used: number) => `${read} adverts read, ${used} used as asking-price evidence.`,
+    advDemo: "Reading printed adverts runs on the server only (live data mode).",
+    advRead: "Read adverts",
+    advCols: { price: "Asking price", rooms: "Rooms", floor: "Floor", area: "sqm", address: "Address", status: "Used" },
+    advDrop: (from: number) => `down from ${from.toLocaleString("en")}`,
     applied: "Registry details applied to the property",
   },
   addressSearch: "Address search",

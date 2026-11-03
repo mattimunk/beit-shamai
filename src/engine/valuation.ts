@@ -9,7 +9,7 @@ import { buildListingEvidence, type ListingEvidence } from "./listingEvidence";
 import { distanceM } from "./geo";
 import { isInDeclaredComplex, nearbyProjects, renewalPotential, type RenewalResult } from "./renewal";
 import { round } from "./stats";
-import type { Subject } from "./types";
+import type { Listing, Subject } from "./types";
 import type { DataProvider } from "../data/provider";
 
 export interface ValuationResult {
@@ -51,6 +51,8 @@ export type Warning =
 export interface ValuationFacts {
   rentMonthly?: number;
   contractSales?: { date: string; price: number }[];
+  /** Adverts the client printed for this case (asking prices), added to the provider's. */
+  caseListings?: Listing[];
 }
 
 export async function valuate(
@@ -70,7 +72,7 @@ export async function valuate(
   const [deals, unitHistory, listings, index, stops, lines, signals, policy, storedPairs] = await Promise.all([
     provider.getDeals({ ...q, sinceIso: since.toISOString().slice(0, 10) }),
     fullKey ? provider.getUnitHistory(fullKey) : Promise.resolve([]),
-    provider.getListings(q),
+    provider.getListings(q).then((ls) => [...ls, ...(facts.caseListings ?? []).filter((c) => !ls.some((l) => l.sourceId === c.sourceId))]),
     provider.getPriceIndex(city),
     provider.getTransitStops({ ...q, radiusM: 2000 }),
     provider.getFutureLines(city),
