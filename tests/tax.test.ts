@@ -91,14 +91,19 @@ describe("data requests", () => {
     expect(areaBand(100)).toEqual([75, 135]);
   });
 
-  test("split: by period first, by area once a month long", () => {
+  test("split: by date into ~120-result pieces using the export's total; by area when too short", () => {
     const base = { id: "x", requestId: "r", city: "c", kind: "k", status: "truncated" as const, areaFrom: 75, areaTo: 135 };
-    const [a, b] = splitItem({ ...base, from: "2026-08-04", to: "2026-11-03" });
-    expect(a.to < b.from).toBe(true);
-    expect(a.areaFrom).toBe(75);
-    const [c, d] = splitItem({ ...base, from: "2026-10-04", to: "2026-11-03" });
-    expect(c.from).toBe(d.from);
-    expect(c.areaTo + 1).toBe(d.areaFrom);
+    const two = splitItem({ ...base, from: "2026-08-04", to: "2026-11-03" });
+    expect(two).toHaveLength(2);
+    expect(two[0]!.to < two[1]!.from).toBe(true);
+    const four = splitItem({ ...base, from: "2026-08-04", to: "2026-11-03" }, 430); // a Tel Aviv quarter
+    expect(four).toHaveLength(4);
+    expect(four[0]!.from).toBe("2026-08-04");
+    expect(four[3]!.to).toBe("2026-11-03");
+    for (let k = 1; k < 4; k++) expect(four[k]!.from).toBe(new Date(Date.parse(four[k - 1]!.to) + 864e5).toISOString().slice(0, 10));
+    const [c, d] = splitItem({ ...base, from: "2026-10-28", to: "2026-11-03" }, 200); // a week: halve the area
+    expect(c!.from).toBe(d!.from);
+    expect(c!.areaTo + 1).toBe(d!.areaFrom);
   });
 
   test("workflow: preliminary → truncated upload splits → uploads finish → final; later request reuses coverage", async () => {
@@ -183,10 +188,18 @@ describe("partly covering uploads", () => {
     expect(fin.item.note).toBe("no_overlap");
   });
 
-  test("busy city (a search hit 150 before) gets monthly searches", async () => {
+  test("search length learned from earlier uploads: ~120 results each (Tel Aviv: about 3 weeks)", async () => {
     const db = openDb(":memory:");
-    await importTaxExport(db, makeExport({ from: "2026-01-01", to: "2026-03-31", areaFrom: 70, total: 300, rows: 150 }), LAYER, undefined, fakeParcels);
+    // 430 sales of 75–135 sqm in a quarter: ~4.7 a day → searches of ~25 days.
+    await importTaxExport(db, makeExport({ from: "2026-05-05", to: "2026-08-04", areaFrom: 75, areaTo: 135, total: 430, rows: 150 }), LAYER, undefined, fakeParcels);
     const req = createRequest(db, subject, "2026-11-03");
-    expect(req.items).toHaveLength(12);
+    const open = req.items.filter((i) => i.status === "pending");
+    const lens = open.map((i) => (Date.parse(i.to) - Date.parse(i.from)) / 864e5 + 1);
+    expect(Math.max(...lens)).toBeLessThanOrEqual(26);
+    expect(Math.min(...lens)).toBeGreaterThanOrEqual(20);
+    expect(open.length).toBeGreaterThanOrEqual(13);
+    // A city never uploaded before keeps 3-month searches.
+    const other = createRequest(db, { ...subject, address: { ...subject.address, city: "חדרה" } } as Subject, "2026-11-03");
+    expect(other.items).toHaveLength(4);
   });
 });

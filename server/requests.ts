@@ -174,12 +174,51 @@ export function reconcileAll(db: Database) {
   for (const r of db.query(`SELECT id FROM requests WHERE status = 'preliminary'`).all() as { id: string }[]) reconcileRequest(db, r.id);
 }
 
-export function buildPlan(subject: Subject, today: string, months = 12, chunkMonths = 3): Omit<PlanItem, "id" | "requestId" | "status">[] {
+/**
+ * Sales per day per sqm of area band in a city, learned from earlier uploads (the export's
+ * "קיימות N תוצאות" count is exact even when the rows are cut at 150). Undefined if unknown.
+ */
+export function cityDensity(db: Database, city: string): number | undefined {
+  ensureTaxTables(db);
+  const c = normaliseCity(normaliseTaxCity(city));
+  const rates = (db.query(`SELECT city, date_from, date_to, area_from, area_to, total, rows, truncated FROM tax_pulls`).all() as any[])
+    .filter((p) => p.city && p.date_from && p.date_to && normaliseCity(normaliseTaxCity(p.city)) === c)
+    .map((p) => {
+      const days = (Date.parse(p.date_to) - Date.parse(p.date_from)) / DAY + 1;
+      const width = (p.area_to ?? (p.area_from ?? 0) + 100) - (p.area_from ?? 0); // open band: assume 100 sqm wide
+      const n = p.total ?? p.rows;
+      return days >= 7 && width > 0 && n ? n / days / width : NaN;
+    })
+    .filter(Number.isFinite);
+  if (!rates.length) return undefined;
+  rates.sort((a, b) => a - b);
+  return rates[Math.floor(rates.length * 0.75)]; // lean high: a cut-off search costs more than an extra one
+}
+
+/** Search length in days aimed at ~120 results (under the 150 cap), between 1 week and 3 months. */
+export function chunkDaysFor(density: number | undefined, areaFrom: number, areaTo: number): number | undefined {
+  if (!density) return undefined;
+  return Math.max(7, Math.min(92, Math.floor(120 / (density * (areaTo - areaFrom)))));
+}
+
+export function buildPlan(subject: Subject, today: string, months = 12, chunkMonths = 3, chunkDays?: number): Omit<PlanItem, "id" | "requestId" | "status">[] {
   const area =
     subject.area.mode === "declared" ? subject.area.area : subject.area.levels.reduce((s, l) => s + l.internalArea, 0) * 1.1;
   const [areaFrom, areaTo] = areaBand(area);
   const items: Omit<PlanItem, "id" | "requestId" | "status">[] = [];
   let to = today;
+  if (chunkDays) {
+    // Equal searches of about chunkDays, newest first, over the same 12 months.
+    const start = Date.parse(today) / DAY - Math.round(months * 30.44) + 1;
+    const n = Math.ceil((Date.parse(today) / DAY - start + 1) / chunkDays);
+    const len = (Date.parse(today) / DAY - start + 1) / n;
+    for (let k = 0; k < n; k++) {
+      const b = Math.round(Date.parse(today) / DAY - k * len);
+      const a = Math.round(Date.parse(today) / DAY - (k + 1) * len) + 1;
+      items.push({ city: subject.address.city, kind: "דירת מגורים", from: dayIso(a), to: dayIso(b), areaFrom, areaTo });
+    }
+    return items;
+  }
   for (let m = 0; m < months; m += chunkMonths) {
     const d = new Date(to + "T00:00:00Z");
     d.setUTCMonth(d.getUTCMonth() - chunkMonths);
@@ -209,11 +248,11 @@ export function createRequest(db: Database, subject: Subject, today = iso(Date.n
   ensureRequestTables(db);
   const id = crypto.randomUUID();
   db.query(`INSERT INTO requests (id, created_at, status, subject) VALUES (?, ?, 'preliminary', ?)`).run(id, new Date().toISOString(), JSON.stringify(subject));
-  // Where 3-month searches have hit the 150 limit before (busy cities), plan monthly ones.
-  const city = normaliseCity(normaliseTaxCity(subject.address.city));
-  const busy = (db.query(`SELECT city FROM tax_pulls WHERE truncated = 1`).all() as { city: string | null }[])
-    .some((p) => p.city && normaliseCity(normaliseTaxCity(p.city)) === city);
-  for (const p of buildPlan(subject, today, 12, busy ? 1 : 3)) {
+  // Size the searches from what earlier uploads showed about this city (~120 results each).
+  const area0 = subject.area.mode === "declared" ? subject.area.area : subject.area.levels.reduce((s, l) => s + l.internalArea, 0) * 1.1;
+  const [af, at] = areaBand(area0);
+  const days = chunkDaysFor(cityDensity(db, subject.address.city), af, at);
+  for (const p of buildPlan(subject, today, 12, 3, days)) {
     insertItem(db, { ...p, id: crypto.randomUUID(), requestId: id, status: "pending" });
   }
   reconcileRequest(db, id, Date.parse(today) / DAY);
@@ -255,15 +294,23 @@ export function criteriaMismatch(item: PlanItem, text: string): string[] {
 }
 
 /** Split a truncated search in two: by period while longer than a month, then by area. */
-export function splitItem(it: PlanItem): [PlanItem, PlanItem] {
-  const days = (Date.parse(it.to) - Date.parse(it.from)) / DAY;
+/**
+ * Split a cut-off search. With the export's true total, into enough date pieces for ~120
+ * results each; otherwise in two. Pieces shorter than 5 days are avoided by halving the area
+ * band instead.
+ */
+export function splitItem(it: PlanItem, total?: number): PlanItem[] {
+  const a = Date.parse(it.from) / DAY, b = Date.parse(it.to) / DAY;
+  const days = b - a + 1;
   const base = { requestId: it.requestId, parentId: it.id, city: it.city, kind: it.kind, status: "pending" as const };
-  if (days > 31) {
-    const mid = iso(Date.parse(it.from) + Math.floor(days / 2) * DAY);
-    return [
-      { ...base, id: crypto.randomUUID(), from: it.from, to: mid, areaFrom: it.areaFrom, areaTo: it.areaTo },
-      { ...base, id: crypto.randomUUID(), from: addDays(mid, 1), to: it.to, areaFrom: it.areaFrom, areaTo: it.areaTo },
-    ];
+  const parts = Math.max(2, total ? Math.ceil(total / 120) : 2);
+  if (days / parts >= 5) {
+    const out: PlanItem[] = [];
+    for (let k = 0; k < parts; k++) {
+      const from = Math.round(a + (k * days) / parts), to = Math.round(a + ((k + 1) * days) / parts) - 1;
+      out.push({ ...base, id: crypto.randomUUID(), from: dayIso(from), to: dayIso(to), areaFrom: it.areaFrom, areaTo: it.areaTo });
+    }
+    return out;
   }
   const midA = Math.round((it.areaFrom + it.areaTo) / 2);
   return [
@@ -304,7 +351,7 @@ export async function uploadToItem(
     // This very search hit the limit: split it in two narrower ones.
     status = "truncated";
     note = `truncated:${imp.totalReported ?? ""}`;
-    for (const child of splitItem(item)) { insertItem(db, child); newItems.push(child); }
+    for (const child of splitItem(item, imp.totalReported)) { insertItem(db, child); newItems.push(child); }
   } else if (imp.truncated) {
     note = "cut_upload";
   }

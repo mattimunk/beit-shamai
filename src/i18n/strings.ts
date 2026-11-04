@@ -236,11 +236,11 @@ const he = {
     copy: "העתקה",
     copied: "הועתק",
     upload: "העלאת קובץ",
-    status: { pending: "ממתין", done: "הושלם", covered: "קיים במאגר", truncated: "נחתך ב-150 – פוצל", split: "כוסה בחלקו – היתרה בשורות חדשות" },
+    status: { pending: "ממתין", done: "הושלם", covered: "קיים במאגר", truncated: "מעל 150 – פוצל", split: "כוסה בחלקו – היתרה בשורות חדשות" },
     notes: {
       split: "הקבצים שהועלו מכסים חלק מהתאריכים – היתרה מופיעה כחיפושים חדשים.",
       remaining: "יתרת תאריכים של חיפוש שכוסה בחלקו.",
-      truncated: (n: string) => `${n ? `${n} תוצאות – ` : ""}מעל מגבלת 150; פוצל לשני חיפושים צרים יותר.`,
+      truncated: (n: string) => `${n ? `${n} תוצאות – ` : ""}מעל מגבלת 150; פוצל לחיפושים קצרים יותר (כ-120 תוצאות כל אחד).`,
       cut_upload: "הקובץ שהועלה נחתך ב-150 תוצאות ולכן לא נספר. יש לצמצם את התאריכים ולהעלות שוב.",
       no_overlap: "הקובץ שהועלה אינו חופף לתאריכים או לשטח של שורה זו (הנתונים נשמרו).",
       city: (c: string) => `הקובץ שהועלה הוא של יישוב אחר${c ? ` (${c})` : ""}; הנתונים נשמרו והחיפוש עדיין פתוח.`,
@@ -510,7 +510,7 @@ const en: Strings = {
     notes: {
       split: "Uploaded files cover part of the dates – the rest is listed as new searches.",
       remaining: "Remaining dates of a partly covered search.",
-      truncated: (n: string) => `${n ? `${n} results – ` : ""}over the 150 limit; split into two narrower searches.`,
+      truncated: (n: string) => `${n ? `${n} results – ` : ""}over the 150 limit; split into shorter searches (~120 results each).`,
       cut_upload: "The uploaded file was cut off at 150 results, so it does not count. Narrow the dates and upload again.",
       no_overlap: "The uploaded file does not overlap this row's dates or area (data was kept).",
       city: (c: string) => `The uploaded file is for another city${c ? ` (${c})` : ""}; data was kept and the search is still open.`,
