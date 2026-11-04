@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { listDataRequests, requestProgress, uploadTaxExport, type PlanItemDto, type RequestDto } from "../data/apiClient";
+import { listDataRequests, requestProgress, uploadTaxExport, uploadTaxExportAny, type PlanItemDto, type RequestDto } from "../data/apiClient";
 import { useT } from "./context";
 
 const TAX_SITE = "https://nadlan.taxes.gov.il/svinfonadlan2010/";
@@ -24,10 +24,33 @@ export function RequestsInbox() {
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
+  const [anyNote, setAnyNote] = useState<string | null>(null);
+
+  const uploadAny = async (files: File[]) => {
+    const notes: string[] = [];
+    for (const f of files) {
+      try {
+        const i = await uploadTaxExportAny(token, f);
+        notes.push(`${f.name}: ${i.truncated ? `⚠ ${i.totalReported ?? "150+"} > 150 – ` : ""}${R.result(i.stored, i.rows, i.partial, i.unlocated)}`);
+      } catch (e) {
+        notes.push(`${f.name}: ⚠ ${(e as Error).message}`);
+      }
+    }
+    setAnyNote(notes.join("\n"));
+    await load();
+  };
 
   const load = async () => {
     setError(null);
     try { keepToken(token); setList(await listDataRequests(token)); } catch (e) { setError((e as Error).message); }
+  };
+
+  const noteText = (n?: string) => {
+    if (!n) return undefined;
+    const [code, arg = ""] = n.split(/:(.*)/s);
+    const N = R.notes as Record<string, string | ((a: string) => string)>;
+    const v = N[code!];
+    return typeof v === "function" ? v(arg) : v ?? n;
   };
 
   const criteriaText = (it: PlanItemDto) =>
@@ -41,8 +64,9 @@ export function RequestsInbox() {
     try {
       const out = await uploadTaxExport(token, req.id, it.id, file);
       const i = out.import;
-      setNotes((n) => ({ ...n, [it.id]: (out.mismatch.length ? `⚠ ${out.mismatch.join("; ")} – ` : "") + R.result(i.stored, i.rows, i.partial, i.unlocated) }));
+      setNotes((n) => ({ ...n, [it.id]: R.result(i.stored, i.rows, i.partial, i.unlocated) + (out.item.note ? ` ${noteText(out.item.note)}` : "") }));
       setList((l) => (l ?? []).map((x) => (x.id === req.id ? out.request : x)));
+      await load(); // one file can also close searches of other open requests
     } catch (e) {
       setNotes((n) => ({ ...n, [it.id]: `⚠ ${(e as Error).message}` }));
     }
@@ -62,6 +86,16 @@ export function RequestsInbox() {
           <span className="muted small">{R.tokenHelp}</span>
         </div>
         {error && <div className="warnings">{error}</div>}
+        {list && (
+          <div className="upload-any">
+            <label className="button primary">
+              {R.uploadAny}
+              <input type="file" accept=".xls,.html,.htm" multiple hidden onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) uploadAny(fs); e.target.value = ""; }} />
+            </label>
+            <span className="muted small">{R.uploadAnyHelp}</span>
+            {anyNote && <pre className="small any-note">{anyNote}</pre>}
+          </div>
+        )}
       </section>
 
       {list && list.length === 0 && <section className="card muted">{R.none}</section>}
@@ -86,7 +120,7 @@ export function RequestsInbox() {
                     <td>{it.kind}</td>
                     <td><bdi>{dmy(it.from)} – {dmy(it.to)}</bdi></td>
                     <td><bdi>{it.areaFrom} – {it.areaTo}</bdi></td>
-                    <td>{R.status[it.status]}{(notes[it.id] ?? it.note) && <div className="small muted">{notes[it.id] ?? it.note}</div>}</td>
+                    <td>{R.status[it.status]}{(notes[it.id] ?? it.note) && <div className="small muted">{notes[it.id] ?? noteText(it.note)}</div>}</td>
                     <td className="actions">
                       {it.status === "pending" && (
                         <>

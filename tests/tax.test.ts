@@ -154,3 +154,39 @@ describe("national parcel layer", () => {
     expect(imp.unlocated).toBe(3);
   });
 });
+
+describe("partly covering uploads", () => {
+  const subject = { ...DEMO_SUBJECT, address: { ...DEMO_SUBJECT.address, city: "תל אביב-יפו" }, area: { mode: "declared", area: 100 } } as Subject;
+
+  test("narrower date ranges count; the rest becomes new searches; uploads to any row count", async () => {
+    const db = openDb(":memory:");
+    const req = createRequest(db, subject, "2026-06-30");
+    const q = req.items.find((i) => i.status === "pending" && i.to === "2026-06-30")!; // 2026-03-31 … 2026-06-30
+    expect(q.from).toBe("2026-03-31");
+    // The user narrowed the dates to stay under 150: April and May only, uploaded to that row.
+    await uploadToItem(db, req.id, q.id, makeExport({ from: "2026-03-31", to: "2026-04-30", areaFrom: q.areaFrom, areaTo: q.areaTo, total: 120, rows: 120 }), LAYER, fakeParcels);
+    const out = await uploadToItem(db, req.id, q.id, makeExport({ from: "2026-05-01", to: "2026-05-31", areaFrom: q.areaFrom, areaTo: q.areaTo, total: 110, rows: 110 }), LAYER, fakeParcels);
+    // Everything that descends from the original search:
+    const all = out.request.items;
+    const ids = new Set([q.id]);
+    for (let grew = true; grew;) { grew = false; for (const i of all) if (i.parentId && ids.has(i.parentId) && !ids.has(i.id)) { ids.add(i.id); grew = true; } }
+    const kids = all.filter((i) => i.id !== q.id && ids.has(i.id));
+    expect(all.find((i) => i.id === q.id)!.status).toBe("split");
+    expect(kids.filter((k) => k.status === "covered").map((k) => [k.from, k.to]).sort()).toEqual([["2026-03-31", "2026-04-30"], ["2026-05-01", "2026-05-31"]]);
+    expect(kids.filter((k) => k.status === "pending")).toHaveLength(1);
+    const rest = kids.find((k) => k.status === "pending")!;
+    expect([rest.from, rest.to]).toEqual(["2026-06-01", "2026-06-30"]);
+    // June uploaded to a *different* row still closes it.
+    const other = out.request.items.find((i) => i.status === "pending" && i.id !== rest.id)!;
+    const fin = await uploadToItem(db, req.id, other.id, makeExport({ from: "2026-06-01", to: "2026-06-30", areaFrom: 50, total: 90, rows: 90 }), LAYER, fakeParcels);
+    expect(fin.request.items.find((i) => i.id === rest.id)!.status).toBe("covered");
+    expect(fin.item.note).toBe("no_overlap");
+  });
+
+  test("busy city (a search hit 150 before) gets monthly searches", async () => {
+    const db = openDb(":memory:");
+    await importTaxExport(db, makeExport({ from: "2026-01-01", to: "2026-03-31", areaFrom: 70, total: 300, rows: 150 }), LAYER, undefined, fakeParcels);
+    const req = createRequest(db, subject, "2026-11-03");
+    expect(req.items).toHaveLength(12);
+  });
+});

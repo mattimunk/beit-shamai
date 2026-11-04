@@ -36,7 +36,7 @@ import { listDocuments, storeDocument } from "./documents";
 import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts";
 import { importDeals, parseCsv } from "./dealsImport";
 import { importTaxExport, relocateUnlocated } from "./taxImport";
-import { createRequest, getRequest, listRequests, uploadToItem } from "./requests";
+import { createRequest, getRequest, listRequests, reconcileAll, uploadToItem } from "./requests";
 
 /** An upload is either multipart (field "file") or the raw file as the body. */
 async function readUploadText(req: Request): Promise<string> {
@@ -142,7 +142,7 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         }
         const reqRoute = url.pathname.match(/^\/api\/requests\/([0-9a-f-]{36})$/);
         if (reqRoute && req.method === "GET") {
-          const r = getRequest(db, reqRoute[1]!);
+          const r = getRequest(db, reqRoute[1]!, true);
           return r ? json(r) : json({ error: "not found" }, 404);
         }
 
@@ -158,7 +158,9 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         }
         if (url.pathname === "/api/tax/import" && req.method === "POST") {
           const text = await readUploadText(req);
-          return json(await runJob(db, "tax-import", "*", () => importTaxExport(db, text, cfg.layers.parcels)));
+          const out = await runJob(db, "tax-import", "*", () => importTaxExport(db, text, cfg.layers.parcels));
+          reconcileAll(db);
+          return json(out);
         }
 
         if (url.pathname === "/api/deals/import" && req.method === "POST") {

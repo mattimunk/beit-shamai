@@ -16,7 +16,11 @@ import { ensureTaxTables, importTaxExport, type TaxImportResult } from "./taxImp
 import { normaliseTaxCity, parseTaxExport } from "./connectors/taxExport";
 import type { ParcelLayer } from "./connectors/parcels";
 
-export type ItemStatus = "pending" | "done" | "covered" | "truncated";
+/**
+ * Row notes are codes, shown in the user's language by the app:
+ *   split | remaining | truncated:<total> | cut_upload | no_overlap | city:<file city>
+ */
+export type ItemStatus = "pending" | "done" | "covered" | "truncated" | "split";
 
 export interface PlanItem {
   id: string;
@@ -98,6 +102,78 @@ export function coveringPull(db: Database, it: Pick<PlanItem, "city" | "from" | 
   return null;
 }
 
+interface PullSpan { id: string; from: number; to: number; aFrom: number; aTo: number }
+
+/** Complete (not cut-off) uploads for a city, as day numbers. */
+function cityPulls(db: Database, city: string): PullSpan[] {
+  ensureTaxTables(db);
+  const c = normaliseCity(normaliseTaxCity(city));
+  return (db.query(`SELECT id, city, date_from, date_to, area_from, area_to FROM tax_pulls WHERE truncated = 0`).all() as any[])
+    .filter((p) => p.city && p.date_from && p.date_to && normaliseCity(normaliseTaxCity(p.city)) === c)
+    .map((p) => ({ id: p.id, from: Date.parse(p.date_from) / DAY, to: Date.parse(p.date_to) / DAY, aFrom: p.area_from ?? 0, aTo: p.area_to ?? Infinity }));
+}
+
+/**
+ * Which days of a search are covered by complete uploads whose area band includes the
+ * search's band. Days are inclusive; a 1-day hole between uploads counts as covered.
+ * The newest search needs coverage only up to a week before its end (registrations lag).
+ */
+export function dateCoverage(it: Pick<PlanItem, "from" | "to" | "areaFrom" | "areaTo">, pulls: PullSpan[], todayDays = Date.now() / DAY) {
+  const from = Date.parse(it.from) / DAY;
+  let to = Date.parse(it.to) / DAY;
+  if (to >= todayDays - 2) to -= 7;
+  const spans = pulls
+    .filter((p) => p.aFrom <= it.areaFrom && p.aTo >= it.areaTo && p.to >= from && p.from <= to)
+    .map((p) => ({ id: p.id, a: Math.max(p.from, from), b: Math.min(p.to, to) }))
+    .sort((x, y) => x.a - y.a);
+  const covered: { a: number; b: number; id: string }[] = [];
+  const gaps: { a: number; b: number }[] = [];
+  let cursor = from;
+  for (const s of spans) {
+    if (s.a > cursor + 1) gaps.push({ a: cursor, b: s.a - 1 });
+    if (s.b >= cursor) { covered.push({ a: Math.max(s.a, cursor), b: s.b, id: s.id }); cursor = s.b + 1; }
+  }
+  if (cursor <= to) gaps.push({ a: cursor, b: to });
+  return { covered, gaps };
+}
+
+const dayIso = (d: number) => iso(Math.round(d) * DAY);
+
+/**
+ * Bring a request's open searches up to date with everything uploaded so far – whichever
+ * row a file was uploaded to. A search fully covered becomes "covered"; one partly covered
+ * is replaced by its covered pieces and new searches for the remaining dates.
+ */
+export function reconcileRequest(db: Database, requestId: string, todayDays = Date.now() / DAY) {
+  // Notes from before they became codes (free text) are dropped on open searches.
+  db.query(`UPDATE plan_items SET note = NULL WHERE request_id = ? AND status = 'pending' AND note LIKE '% %'`).run(requestId);
+  const rows = (db.query(`SELECT * FROM plan_items WHERE request_id = ? AND status = 'pending'`).all(requestId) as any[]).map(rowToItem);
+  for (const it of rows) {
+    const pulls = cityPulls(db, it.city);
+    const { covered, gaps } = dateCoverage(it, pulls, todayDays);
+    if (!covered.length) {
+      const byArea = coveringPull(db, it); // adjacent area bands over the whole period
+      if (byArea) db.query(`UPDATE plan_items SET status = 'covered', pull_id = ? WHERE id = ?`).run(byArea, it.id);
+      continue;
+    }
+    if (!gaps.length) {
+      db.query(`UPDATE plan_items SET status = 'covered', pull_id = ?, note = NULL WHERE id = ?`).run(covered[0]!.id, it.id);
+      continue;
+    }
+    const base = { requestId, parentId: it.id, city: it.city, kind: it.kind, areaFrom: it.areaFrom, areaTo: it.areaTo };
+    for (const c of covered) insertItem(db, { ...base, id: crypto.randomUUID(), from: dayIso(c.a), to: dayIso(c.b), status: "covered", pullId: c.id });
+    for (const g of gaps) insertItem(db, { ...base, id: crypto.randomUUID(), from: dayIso(g.a), to: dayIso(g.b), status: "pending", note: "remaining" });
+    db.query(`UPDATE plan_items SET status = 'split', note = ? WHERE id = ?`).run("split", it.id);
+  }
+  refreshStatus(db, requestId);
+}
+
+/** Reconcile every open request (after an upload not tied to a search). */
+export function reconcileAll(db: Database) {
+  ensureRequestTables(db);
+  for (const r of db.query(`SELECT id FROM requests WHERE status = 'preliminary'`).all() as { id: string }[]) reconcileRequest(db, r.id);
+}
+
 export function buildPlan(subject: Subject, today: string, months = 12, chunkMonths = 3): Omit<PlanItem, "id" | "requestId" | "status">[] {
   const area =
     subject.area.mode === "declared" ? subject.area.area : subject.area.levels.reduce((s, l) => s + l.internalArea, 0) * 1.1;
@@ -133,16 +209,20 @@ export function createRequest(db: Database, subject: Subject, today = iso(Date.n
   ensureRequestTables(db);
   const id = crypto.randomUUID();
   db.query(`INSERT INTO requests (id, created_at, status, subject) VALUES (?, ?, 'preliminary', ?)`).run(id, new Date().toISOString(), JSON.stringify(subject));
-  for (const p of buildPlan(subject, today)) {
-    const cover = coveringPull(db, p);
-    insertItem(db, { ...p, id: crypto.randomUUID(), requestId: id, status: cover ? "covered" : "pending", pullId: cover ?? undefined });
+  // Where 3-month searches have hit the 150 limit before (busy cities), plan monthly ones.
+  const city = normaliseCity(normaliseTaxCity(subject.address.city));
+  const busy = (db.query(`SELECT city FROM tax_pulls WHERE truncated = 1`).all() as { city: string | null }[])
+    .some((p) => p.city && normaliseCity(normaliseTaxCity(p.city)) === city);
+  for (const p of buildPlan(subject, today, 12, busy ? 1 : 3)) {
+    insertItem(db, { ...p, id: crypto.randomUUID(), requestId: id, status: "pending" });
   }
-  refreshStatus(db, id);
+  reconcileRequest(db, id, Date.parse(today) / DAY);
   return getRequest(db, id)!;
 }
 
-export function getRequest(db: Database, id: string): RequestRecord | null {
+export function getRequest(db: Database, id: string, reconcile = false): RequestRecord | null {
   ensureRequestTables(db);
+  if (reconcile) reconcileRequest(db, id);
   const r: any = db.query(`SELECT * FROM requests WHERE id = ?`).get(id);
   if (!r) return null;
   const items = (db.query(`SELECT * FROM plan_items WHERE request_id = ? ORDER BY date_to DESC, area_from`).all(id) as any[]).map(rowToItem);
@@ -152,7 +232,7 @@ export function getRequest(db: Database, id: string): RequestRecord | null {
 export function listRequests(db: Database, onlyOpen = true): RequestRecord[] {
   ensureRequestTables(db);
   const ids = db.query(`SELECT id FROM requests ${onlyOpen ? "WHERE status = 'preliminary'" : ""} ORDER BY created_at DESC LIMIT 200`).all() as { id: string }[];
-  return ids.map((x) => getRequest(db, x.id)!).filter(Boolean);
+  return ids.map((x) => getRequest(db, x.id, onlyOpen)!).filter(Boolean);
 }
 
 function refreshStatus(db: Database, id: string) {
@@ -217,16 +297,29 @@ export async function uploadToItem(
   const newItems: PlanItem[] = [];
   let status: ItemStatus = item.status;
   let note: string | undefined;
-  if (mismatch.length) {
-    note = `file does not match this search: ${mismatch.join("; ")} – data was kept, search still open`;
-  } else if (imp.truncated) {
+  const cityWrong = mismatch.some((m) => m.startsWith("city"));
+  if (cityWrong) {
+    note = `city:${parseTaxExport(text).criteria.city ?? ""}`;
+  } else if (imp.truncated && !mismatch.length && item.status === "pending") {
+    // This very search hit the limit: split it in two narrower ones.
     status = "truncated";
-    note = `${imp.totalReported ?? "150+"} results exceed the 150 limit – split into two narrower searches`;
+    note = `truncated:${imp.totalReported ?? ""}`;
     for (const child of splitItem(item)) { insertItem(db, child); newItems.push(child); }
-  } else {
-    status = "done";
+  } else if (imp.truncated) {
+    note = "cut_upload";
   }
-  db.query(`UPDATE plan_items SET status = ?, pull_id = ?, note = ? WHERE id = ?`).run(status, imp.pullId, note ?? null, itemId);
-  refreshStatus(db, requestId);
+  db.query(`UPDATE plan_items SET status = ?, pull_id = COALESCE(pull_id, ?), note = ? WHERE id = ?`).run(status, imp.pullId, note ?? null, itemId);
+  reconcileRequest(db, requestId);
+  let after = rowToItem(db.query(`SELECT * FROM plan_items WHERE id = ?`).get(itemId));
+  if (after.status === "covered" && after.pullId === imp.pullId) {
+    db.query(`UPDATE plan_items SET status = 'done' WHERE id = ?`).run(itemId);
+    after = { ...after, status: "done" };
+  }
+  if (after.status === "pending" && !after.note && !imp.truncated) {
+    db.query(`UPDATE plan_items SET note = ? WHERE id = ?`).run("no_overlap", itemId);
+    after.note = "no_overlap";
+  }
+  status = after.status;
+  note = after.note;
   return { import: imp, mismatch, item: { ...item, status, pullId: imp.pullId, note }, newItems, request: getRequest(db, requestId)! };
 }
