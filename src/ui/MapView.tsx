@@ -3,16 +3,18 @@ import type { ValuationResult } from "../engine/valuation";
 import type { LatLng, Listing, RenewalStage, TransitStop } from "../engine/types";
 import { STAGE_ORDER } from "../engine/renewal";
 import { useT } from "./context";
+import { basemapTiles, TILE_ATTRIBUTION, TILE_COPYRIGHT_URL } from "./basemap";
 
 /**
- * Schematic map in local metres around the property (no external tiles, so it works offline
- * and in print). A production build would swap this for GovMap / municipal GIS base layers.
+ * Map in local metres around the property. With live data, OpenStreetMap street tiles are
+ * drawn underneath; the demo (a fictional town) keeps the plain schematic background.
  */
 const HALF = 1100; // metres shown either side of the property
 const SIZE = 520;
 
 export function MapView({ r, center, stops, listings }: { r: ValuationResult; center: LatLng; stops: TransitStop[]; listings: Listing[] }) {
   const { t, f } = useT();
+  const tiles = r.dataSource.isDemo ? [] : basemapTiles(center, HALF, SIZE);
   const px = (p: LatLng) => {
     const m = toLocalM(center, p);
     return { x: SIZE / 2 + (m.x / HALF) * (SIZE / 2), y: SIZE / 2 - (m.y / HALF) * (SIZE / 2) };
@@ -31,6 +33,15 @@ export function MapView({ r, center, stops, listings }: { r: ValuationResult; ce
     <figure className="map">
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label={t.map}>
         <rect width={SIZE} height={SIZE} fill="var(--c-map-bg)" />
+        {tiles.length > 0 && (
+          <g aria-hidden>
+            {tiles.map((tl) => (
+              <image key={tl.url} href={tl.url} x={tl.x} y={tl.y} width={tl.w + 0.5} height={tl.h + 0.5} preserveAspectRatio="none" />
+            ))}
+            {/* Soften the street map so the markers stay readable. */}
+            <rect width={SIZE} height={SIZE} fill="#fff" fillOpacity={0.35} />
+          </g>
+        )}
         {[300, 600, 1000].map((m) => (
           <g key={m}>
             <circle cx={SIZE / 2} cy={SIZE / 2} r={rPx(m)} fill="none" stroke="var(--c-grid)" strokeDasharray={m === r.comparables.radiusM ? "0" : "4 4"} strokeWidth={m === r.comparables.radiusM ? 1.5 : 1} />
@@ -100,6 +111,11 @@ export function MapView({ r, center, stops, listings }: { r: ValuationResult; ce
         <span><i className="sw transit" /> {t.legend.bus}</span>
         <span><i className="sw future" /> {t.legend.future}</span>
         <span><i className="sw renewal" /> {t.legend.renewal}</span>
+        {tiles.length > 0 && (
+          <span className="attribution">
+            <a href={TILE_COPYRIGHT_URL} target="_blank" rel="noreferrer">{TILE_ATTRIBUTION}</a>
+          </span>
+        )}
       </figcaption>
     </figure>
   );

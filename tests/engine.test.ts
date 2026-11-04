@@ -148,3 +148,20 @@ describe("end-to-end on demo data", () => {
     expect(r.renewal.nearby.find((p) => p.projectKey === "p-far")).toBeUndefined();
   });
 });
+
+describe("street-map tiles", () => {
+  test("cover the ±1.1 km square around Tel Aviv at zoom 15, positioned in map pixels", async () => {
+    const { basemapTiles } = await import("../src/ui/basemap");
+    const tiles = basemapTiles({ lat: 32.0775, lng: 34.7745 }, 1100, 520);
+    expect(tiles[0]!.url).toMatch(/^https:\/\/tile\.openstreetmap\.org\/15\/\d+\/\d+\.png$/);
+    // Tiles together cover the whole box.
+    expect(Math.min(...tiles.map((t) => t.x))).toBeLessThanOrEqual(0);
+    expect(Math.min(...tiles.map((t) => t.y))).toBeLessThanOrEqual(0);
+    expect(Math.max(...tiles.map((t) => t.x + t.w))).toBeGreaterThanOrEqual(520);
+    expect(Math.max(...tiles.map((t) => t.y + t.h))).toBeGreaterThanOrEqual(520);
+    // A zoom-15 tile at this latitude is ~1,040 m ≈ 245 px here.
+    expect(tiles[0]!.w).toBeGreaterThan(230);
+    expect(tiles[0]!.w).toBeLessThan(260);
+    expect(tiles.length).toBeLessThanOrEqual(16);
+  });
+});
