@@ -11,7 +11,7 @@ export function normaliseStreet(raw: string): string {
   let s = raw
     .toLowerCase()
     .replace(/["'׳״`]/g, (c) => (c === "״" || c === '"' ? "" : "'"))
-    .replace(/[-–—_.,]/g, " ")
+    .replace(/[-\u05BE\u2010-\u2015\u2212_.,]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   // strip leading type words (possibly repeated)
@@ -31,7 +31,7 @@ export function normaliseStreet(raw: string): string {
 export function normaliseCity(raw: string): string {
   return raw
     .replace(/["'׳״]/g, "")
-    .replace(/[-–—]/g, " ")
+    .replace(/[-\u05BE\u2010-\u2015\u2212]/g, " ") // hyphen, Hebrew maqaf, dashes, minus
     .replace(/\s+/g, " ")
     .replace(/^ת\s?א\s?יפו$|^תל אביב$/, "תל אביב יפו")
     .trim();

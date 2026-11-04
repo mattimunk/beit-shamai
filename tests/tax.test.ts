@@ -203,3 +203,15 @@ describe("partly covering uploads", () => {
     expect(other.items).toHaveLength(4);
   });
 });
+
+describe("city names from the address search", () => {
+  test("an order for 'תל־אביב–יפו' (maqaf, en dash) is covered by uploads for 'תל אביב -יפו'", async () => {
+    const db = openDb(":memory:");
+    const s = { ...DEMO_SUBJECT, address: { ...DEMO_SUBJECT.address, city: "תל־אביב–יפו" }, area: { mode: "declared", area: 100 } } as Subject;
+    const req = createRequest(db, s, "2026-06-30");
+    const q = req.items.find((i) => i.to === "2026-06-30")!;
+    const out = await uploadToItem(db, req.id, q.id, makeExport({ from: q.from, to: "2026-05-15", areaFrom: q.areaFrom, areaTo: q.areaTo, total: 140, rows: 140 }), LAYER, fakeParcels);
+    expect(out.mismatch.filter((m) => m.startsWith("city"))).toEqual([]);
+    expect(out.request.items.find((i) => i.id === q.id)!.status).toBe("split");
+  });
+});
