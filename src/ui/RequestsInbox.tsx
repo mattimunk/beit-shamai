@@ -16,7 +16,7 @@ function keepToken(v: string) {
  * Inbox for whoever has Tax Authority access: open requests, each with the exact searches
  * to run in the "מידע נדל"ן" system and an upload button per search.
  */
-export function RequestsInbox() {
+export function RequestsInbox({ onOpen }: { onOpen?: (r: RequestDto) => void }) {
   const { t } = useT();
   const R = t.req;
   const [token, setToken] = useState(readToken);
@@ -25,6 +25,7 @@ export function RequestsInbox() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
   const [anyNote, setAnyNote] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   const uploadAny = async (files: File[]) => {
     const notes: string[] = [];
@@ -40,9 +41,9 @@ export function RequestsInbox() {
     await load();
   };
 
-  const load = async () => {
+  const load = async (all = showAll) => {
     setError(null);
-    try { keepToken(token); setList(await listDataRequests(token)); } catch (e) { setError((e as Error).message); }
+    try { keepToken(token); setList(await listDataRequests(token, all)); } catch (e) { setError((e as Error).message); }
   };
 
   const noteText = (n?: string) => {
@@ -82,7 +83,10 @@ export function RequestsInbox() {
             <span>{R.token}</span>
             <input type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" />
           </label>
-          <button className="primary" onClick={load} disabled={!token}>{R.load}</button>
+          <button className="primary" onClick={() => load()} disabled={!token}>{R.load}</button>
+          <label className="inline small">
+            <input type="checkbox" checked={showAll} onChange={(e) => { setShowAll(e.target.checked); if (token) load(e.target.checked); }} /> {R.showAll}
+          </label>
           <span className="muted small">{R.tokenHelp}</span>
         </div>
         {error && <div className="warnings">{error}</div>}
@@ -108,7 +112,10 @@ export function RequestsInbox() {
               <b><bdi>{s.address.street} {s.address.number}, {s.address.city}</bdi></b>
               <span className={"badge " + req.status}>{req.status === "final" ? R.final : R.preliminary}</span>
               <span className="muted small">{R.progress(p.done, p.total)} · {req.createdAt.slice(0, 16).replace("T", " ")}</span>
+              {onOpen && <button className="ghost open-report" onClick={() => onOpen(req)}>{R.openReport}</button>}
             </header>
+            <details open={req.status !== "final"}>
+            <summary className="small muted">{R.searches(req.items.length)}</summary>
             <table className="plan">
               <thead>
                 <tr><th>{R.cols.city}</th><th>{R.cols.kind}</th><th>{R.cols.period}</th><th>{R.cols.area}</th><th>{R.cols.status}</th><th /></tr>
@@ -136,6 +143,7 @@ export function RequestsInbox() {
                 ))}
               </tbody>
             </table>
+            </details>
           </section>
         );
       })}

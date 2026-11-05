@@ -33,7 +33,10 @@ const canPrint = (() => {
 export function App() {
   const provider = useMemo(() => new DemoProvider(), []);
   const [lang, setLang] = useState<Lang>("he");
-  const [role, setRole] = useState<Role>("buyer");
+  const [role, setRoleState] = useState<Role>(() => {
+    try { const v = localStorage.getItem("bs-role"); return v === "realtor" || v === "appraiser" ? v : "buyer"; } catch { return "buyer"; }
+  });
+  const setRole = (r: Role) => { setRoleState(r); try { localStorage.setItem("bs-role", r); } catch { /* memory only */ } };
   const [tab, setTab] = useState<Tab>("valuation");
   const [subject, setSubject] = useState<Subject>(DEMO_SUBJECT);
   const [result, setResult] = useState<ValuationResult | null>(null);
@@ -168,7 +171,14 @@ export function App() {
         {!live && <div className="demo-banner no-print">{t.demoBanner}</div>}
 
         {tab === "requests" && live ? (
-          <RequestsInbox />
+          <RequestsInbox
+            onOpen={(r) => {
+              setSubject(r.subject);
+              setRequest(r);
+              saveReqId(r.id);
+              setTab("report");
+            }}
+          />
         ) : tab === "valuation" ? (
           <main className="layout">
             <aside className="inputs no-print">

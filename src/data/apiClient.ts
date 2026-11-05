@@ -75,8 +75,8 @@ export async function getDataRequest(id: string): Promise<RequestDto> {
   return j;
 }
 
-export async function listDataRequests(token: string): Promise<RequestDto[]> {
-  const r = await fetch("/api/requests", { headers: { authorization: `Bearer ${token}` } });
+export async function listDataRequests(token: string, all = false): Promise<RequestDto[]> {
+  const r = await fetch(`/api/requests${all ? "?all=1" : ""}`, { headers: { authorization: `Bearer ${token}` } });
   const j = await r.json();
   if (!r.ok) throw new Error(j?.error ?? `requests ${r.status}`);
   return j;
