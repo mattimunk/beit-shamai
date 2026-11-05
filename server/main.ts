@@ -10,6 +10,9 @@
  *   GET  /api/parcel-at?lat&lng    nearest parcels (suggested block/parcel for an address)
  *   POST /api/cases/:caseId/adverts   Madlan/Yad2 print-to-PDF (multipart: file) → cards read
  *   GET  /api/cases/:caseId/adverts   the case's adverts and whether each is used
+ *   GET  /api/cases?ids=a,b          summaries of property files (the browser's own list)
+ *   GET  /api/cases/:caseId          a property file (its id is its key)
+ *   PUT  /api/cases/:caseId          { subject } – create or update a property file
  *   GET  /api/cases/:caseId/capture   visit layout + captured shots (frames for the report)
  *   PUT  /api/cases/:caseId/capture   { layout } – bedrooms, bathrooms, balconies…
  *   POST /api/cases/:caseId/capture/:shotId   one video or photo (multipart: file)
@@ -40,6 +43,7 @@ import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
 import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts";
 import { parcelsNear } from "./connectors/parcelsOpen";
+import { caseSummaries, getCase, saveCase } from "./cases";
 import { MAX_CAPTURE_BYTES, framePath, getLayout, listCaptures, saveLayout, storeCapture, type Layout } from "./capture";
 import { importDeals, parseCsv } from "./dealsImport";
 import { importTaxExport, relocateUnlocated } from "./taxImport";
@@ -125,6 +129,22 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           const facts: ValuationFacts = { ...(body.facts ?? {}) };
           if (body.caseId && /^[A-Za-z0-9-]{16,64}$/.test(body.caseId)) facts.caseListings = caseListings(db, body.caseId, body.subject.address.city);
           return json(await valuate(body.subject, provider, date, facts));
+        }
+
+        if (url.pathname === "/api/cases" && req.method === "GET") {
+          return json(caseSummaries(db, (url.searchParams.get("ids") ?? "").split(",").filter(Boolean)));
+        }
+        const caseRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})$/);
+        if (caseRoute) {
+          if (req.method === "GET") {
+            const c = getCase(db, caseRoute[1]!);
+            return c ? json(c) : json({ error: "not found" }, 404);
+          }
+          if (req.method === "PUT") {
+            const b = (await req.json()) as { subject: Subject };
+            if (!b?.subject?.address) return json({ error: "subject required" }, 400);
+            return json(saveCase(db, caseRoute[1]!, b.subject));
+          }
         }
 
         const capRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/capture(?:\/([a-z]+(?:-\d{1,2})?))?$/);

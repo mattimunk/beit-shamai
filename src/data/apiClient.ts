@@ -162,3 +162,33 @@ export function uploadShot(caseId: string, shotId: string, file: File, onProgres
     xhr.send(form);
   });
 }
+
+// ---- Property files --------------------------------------------------------------------------
+
+export interface CaseSummaryDto { id: string; address: string; updatedAt: string; createdAt: string; shots: number }
+
+export async function getCaseFile(id: string): Promise<{ id: string; subject: Subject } | null> {
+  const r = await fetch(`/api/cases/${encodeURIComponent(id)}`);
+  return r.ok ? r.json() : null;
+}
+
+export async function saveCaseFile(id: string, subject: Subject): Promise<void> {
+  await fetch(`/api/cases/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject }) });
+}
+
+export async function listCaseFiles(ids: string[]): Promise<CaseSummaryDto[]> {
+  if (!ids.length) return [];
+  const r = await fetch(`/api/cases?ids=${ids.map(encodeURIComponent).join(",")}`);
+  return r.ok ? r.json() : [];
+}
+
+/** The property files this browser has opened, newest first (kept in this browser). */
+export function knownCases(): string[] {
+  try { return JSON.parse(localStorage.getItem("bs-cases") ?? "[]"); } catch { return []; }
+}
+export function rememberCase(id: string) {
+  try { localStorage.setItem("bs-cases", JSON.stringify([id, ...knownCases().filter((x) => x !== id)].slice(0, 200))); } catch { /* memory only */ }
+}
+
+/** Link that opens only the guided filming for one property (agent or buyer, on a phone). */
+export const visitLink = (caseId: string) => `${location.origin}/?visit=${encodeURIComponent(caseId)}`;

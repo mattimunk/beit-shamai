@@ -4,7 +4,23 @@ import type { Subject } from "../engine/types";
 import { createDataRequest, detectServer, getDataRequest, requestProgress, valuateRemote, type RequestDto } from "../data/apiClient";
 import { RequestsInbox } from "./RequestsInbox";
 import { CaptureTour, shotOrder } from "./CaptureTour";
-import { frameUrl, getCapture, type CaptureDto } from "../data/apiClient";
+import { frameUrl, getCapture, getCaseFile, rememberCase, saveCaseFile, type CaptureDto } from "../data/apiClient";
+import { PropertyBar } from "./PropertyBar";
+import { VisitShare } from "./VisitShare";
+
+/** A new property file starts with neutral details – nothing from the demo flat that could
+ * end up in a real report (no extras, no unpermitted balcony, no block/parcel). */
+function newSubject(): Subject {
+  return {
+    ...DEMO_SUBJECT,
+    address: { city: "", street: "", number: "" },
+    location: { lat: 32.0853, lng: 34.7818 },
+    parcel: undefined,
+    addOns: [],
+    condition: "original",
+    directions: [],
+  };
+}
 import { DemoProvider, DEMO_VALUATION_DATE } from "../data/demo/demoProvider";
 import { DEMO_SUBJECT } from "../data/demo/demoSubject";
 import { STRINGS, type Lang } from "../i18n/strings";
@@ -32,6 +48,8 @@ const canPrint = (() => {
   }
 })();
 
+const addressLine = (s: Subject) => [s.address.street, s.address.number].filter(Boolean).join(" ") + (s.address.city ? `, ${s.address.city}` : "");
+
 export function App() {
   const provider = useMemo(() => new DemoProvider(), []);
   const [lang, setLang] = useState<Lang>("he");
@@ -58,6 +76,55 @@ export function App() {
   const setCaseId = (id: string) => { setCaseIdState(id); try { sessionStorage.setItem("bs-case", id); } catch { /* memory only */ } };
   useEffect(() => { try { sessionStorage.setItem("bs-case", caseId); } catch { /* memory only */ } }, []);
   const [captures, setCaptures] = useState<CaptureDto[]>([]);
+  const [filesKey, setFilesKey] = useState(0);
+  const [savedAddress, setSavedAddress] = useState<string | null>(null);
+
+  // Live mode: load this tab's property file from the server, if it has one.
+  useEffect(() => {
+    if (!live) return;
+    getCaseFile(caseId).then((c) => { if (c) { setSubject(c.subject); setSavedAddress(addressLine(c.subject)); } }).catch(() => {});
+  }, [live, caseId]);
+
+  // Save the property's details to its file as they are edited (once it has an address).
+  useEffect(() => {
+    // Not before it has an address, and never the demo flat.
+    if (!live || !subject.address.street.trim() || subject.address.city === DEMO_SUBJECT.address.city) return;
+    const h = setTimeout(() => {
+      saveCaseFile(caseId, subject).then(() => {
+        rememberCase(caseId);
+        const a = addressLine(subject);
+        if (a !== savedAddress) { setSavedAddress(a); setFilesKey((k) => k + 1); }
+      }).catch(() => {});
+    }, 800);
+    return () => clearTimeout(h);
+  }, [live, caseId, subject]);
+
+  const openCase = async (id: string) => {
+    const c = await getCaseFile(id).catch(() => null);
+    setCaseId(id);
+    if (c) setSubject(c.subject);
+    setSavedAddress(c ? addressLine(c.subject) : null);
+    setDocs([]);
+    setRequest(null);
+    saveReqId(null);
+    rememberCase(id);
+    setTab("valuation");
+  };
+  const newCase = () => {
+    const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`.replace(/\./g, "");
+    setCaseId(id);
+    setSubject(newSubject());
+    setSavedAddress(null);
+    setDocs([]);
+    setCaptures([]);
+    setRequest(null);
+    saveReqId(null);
+    setTab("valuation");
+  };
+  // The filming link must open an existing file, so opening the visit tab saves it.
+  useEffect(() => {
+    if (live && tab === "visit") saveCaseFile(caseId, subject).then(() => { rememberCase(caseId); setFilesKey((k) => k + 1); }).catch(() => {});
+  }, [live, tab, caseId]);
   useEffect(() => {
     if (!live) return;
     getCapture(caseId).then((r) => setCaptures(r.captures)).catch(() => setCaptures([]));
@@ -188,13 +255,17 @@ export function App() {
         </header>
 
         {!live && <div className="demo-banner no-print">{t.demoBanner}</div>}
+        {live && <PropertyBar caseId={caseId} address={addressLine(effective)} onOpen={openCase} onNew={newCase} refreshKey={filesKey} />}
 
         {tab === "visit" && live ? (
-          <CaptureTour caseId={caseId} subject={effective} onChange={setCaptures} />
+          <div className="visit-wrap">
+            <VisitShare caseId={caseId} address={addressLine(effective)} />
+            <CaptureTour key={caseId} caseId={caseId} subject={effective} onChange={setCaptures} />
+          </div>
         ) : tab === "requests" && live ? (
           <RequestsInbox
             onOpen={(r) => {
-              if (r.caseId) setCaseId(r.caseId);
+              if (r.caseId) { setCaseId(r.caseId); rememberCase(r.caseId); }
               setSubject(r.subject);
               setRequest(r);
               saveReqId(r.id);
