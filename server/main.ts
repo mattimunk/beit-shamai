@@ -10,6 +10,10 @@
  *   GET  /api/parcel-at?lat&lng    nearest parcels (suggested block/parcel for an address)
  *   POST /api/cases/:caseId/adverts   Madlan/Yad2 print-to-PDF (multipart: file) → cards read
  *   GET  /api/cases/:caseId/adverts   the case's adverts and whether each is used
+ *   GET  /api/cases/:caseId/capture   visit layout + captured shots (frames for the report)
+ *   PUT  /api/cases/:caseId/capture   { layout } – bedrooms, bathrooms, balconies…
+ *   POST /api/cases/:caseId/capture/:shotId   one video or photo (multipart: file)
+ *   GET  /api/cases/:caseId/frames/:name      a report frame (JPEG)
  *   POST /api/requests             { subject } → request with its Tax Authority search plan
  *   GET  /api/requests/:id         request status (preliminary / final) and plan
  *   GET  /api/requests             open requests (inbox)                                   [admin]
@@ -36,6 +40,7 @@ import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
 import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts";
 import { parcelsNear } from "./connectors/parcelsOpen";
+import { MAX_CAPTURE_BYTES, framePath, getLayout, listCaptures, saveLayout, storeCapture, type Layout } from "./capture";
 import { importDeals, parseCsv } from "./dealsImport";
 import { importTaxExport, relocateUnlocated } from "./taxImport";
 import { createRequest, getRequest, listRequests, reconcileAll, uploadToItem } from "./requests";
@@ -90,6 +95,7 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
 
   const server = Bun.serve({
     port: opts.port ?? Number(process.env.PORT ?? 8787),
+    maxRequestBodySize: MAX_CAPTURE_BYTES + 1024 * 1024, // visit videos
     async fetch(req) {
       const url = new URL(req.url);
       try {
@@ -121,6 +127,29 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           return json(await valuate(body.subject, provider, date, facts));
         }
 
+        const capRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/capture(?:\/([a-z]+(?:-\d{1,2})?))?$/);
+        if (capRoute) {
+          const caseId = capRoute[1]!, shotId = capRoute[2];
+          if (!shotId && req.method === "GET") return json({ layout: getLayout(db, caseId), captures: listCaptures(db, caseId) });
+          if (!shotId && req.method === "PUT") {
+            const b = (await req.json()) as { layout: Layout };
+            if (!b?.layout) return json({ error: "layout required" }, 400);
+            saveLayout(db, caseId, b.layout);
+            return json({ ok: true });
+          }
+          if (shotId && req.method === "POST") {
+            const f = (await req.formData()).get("file");
+            if (!(f instanceof File)) return json({ error: "file required" }, 400);
+            try { return json(await storeCapture(db, caseId, shotId, f)); } catch (e) { return json({ error: (e as Error).message }, 400); }
+          }
+        }
+        const frameRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/frames\/([^/]+)$/);
+        if (frameRoute && req.method === "GET") {
+          const p = framePath(frameRoute[1]!, frameRoute[2]!);
+          if (!p || !existsSync(p)) return json({ error: "not found" }, 404);
+          return new Response(Bun.file(p), { headers: { "content-type": "image/jpeg", "cache-control": "private, max-age=86400" } });
+        }
+
         const advRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/adverts$/);
         if (advRoute) {
           const caseId = advRoute[1]!;
@@ -144,9 +173,10 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
 
         // Report requests: anyone may open one; its id is the capability to read it.
         if (url.pathname === "/api/requests" && req.method === "POST") {
-          const b = (await req.json()) as { subject: Subject };
+          const b = (await req.json()) as { subject: Subject; caseId?: string };
           if (!b?.subject?.address?.city) return json({ error: "subject with city required" }, 400);
-          return json(createRequest(db, b.subject));
+          const caseId = b.caseId && /^[A-Za-z0-9-]{16,64}$/.test(b.caseId) ? b.caseId : undefined;
+          return json(createRequest(db, b.subject, undefined, caseId));
         }
         const reqRoute = url.pathname.match(/^\/api\/requests\/([0-9a-f-]{36})$/);
         if (reqRoute && req.method === "GET") {

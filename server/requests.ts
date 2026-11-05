@@ -43,6 +43,8 @@ export interface RequestRecord {
   status: "preliminary" | "final";
   finalAt?: string;
   subject: Subject;
+  /** The app's case (documents, adverts, visit capture) this order belongs to. */
+  caseId?: string;
   items: PlanItem[];
 }
 
@@ -60,6 +62,7 @@ export function ensureRequestTables(db: Database) {
     );
     CREATE INDEX IF NOT EXISTS plan_items_req ON plan_items(request_id);
   `);
+  try { db.exec(`ALTER TABLE requests ADD COLUMN case_id TEXT`); } catch { /* already there */ }
 }
 
 /** Area band searched for a subject of area A (sqm): roughly −25% … +35%. */
@@ -276,10 +279,10 @@ function insertItem(db: Database, it: PlanItem) {
   ).run(it.id, it.requestId, it.parentId ?? null, it.city, it.kind, it.from, it.to, it.areaFrom, it.areaTo, it.status, it.pullId ?? null, it.note ?? null);
 }
 
-export function createRequest(db: Database, subject: Subject, today = iso(Date.now())): RequestRecord {
+export function createRequest(db: Database, subject: Subject, today = iso(Date.now()), caseId?: string): RequestRecord {
   ensureRequestTables(db);
   const id = crypto.randomUUID();
-  db.query(`INSERT INTO requests (id, created_at, status, subject) VALUES (?, ?, 'preliminary', ?)`).run(id, new Date().toISOString(), JSON.stringify(subject));
+  db.query(`INSERT INTO requests (id, created_at, status, subject, case_id) VALUES (?, ?, 'preliminary', ?, ?)`).run(id, new Date().toISOString(), JSON.stringify(subject), caseId ?? null);
   // Size the searches from what earlier uploads showed about this city (~120 results each).
   const area0 = subject.area.mode === "declared" ? subject.area.area : subject.area.levels.reduce((s, l) => s + l.internalArea, 0) * 1.1;
   const [af, at] = areaBand(area0);
@@ -297,7 +300,7 @@ export function getRequest(db: Database, id: string, reconcile = false): Request
   const r: any = db.query(`SELECT * FROM requests WHERE id = ?`).get(id);
   if (!r) return null;
   const items = (db.query(`SELECT * FROM plan_items WHERE request_id = ? ORDER BY date_to DESC, area_from`).all(id) as any[]).map(rowToItem);
-  return { id: r.id, createdAt: r.created_at, status: r.status, finalAt: r.final_at ?? undefined, subject: JSON.parse(r.subject), items };
+  return { id: r.id, createdAt: r.created_at, status: r.status, finalAt: r.final_at ?? undefined, subject: JSON.parse(r.subject), caseId: r.case_id ?? undefined, items };
 }
 
 export function listRequests(db: Database, onlyOpen = true): RequestRecord[] {

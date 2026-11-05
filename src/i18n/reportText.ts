@@ -29,6 +29,7 @@ const he = {
   },
   toc: "תוכן עניינים",
   ch: {
+    photos: "נספח – תמונות מהנכס",
     purpose: "מטרת חוות הדעת",
     dates: "המועד הקובע וביקור בנכס",
     documents: "מסמכים שעמדו לרשותי",
@@ -90,6 +91,7 @@ const he = {
   dataExcluded: "עסקאות שנבחנו ולא נכללו",
   excludedReason: { too_far: "מחוץ לרדיוס", too_old: "מועד העסקה רחוק מהמועד הקובע", over_adjusted: "שונות רבה מהנכס – סך ההתאמות חורג מהמותר", outlier: "חריגה ממחירי השוק בסביבה", beyond_max: "דמיון נמוך יחסית; נכללו עסקאות דומות יותר", partial_sale: "מכירת חלק מהזכויות בנכס" },
   excludedNone: "לא נמצאו עסקאות נוספות ברדיוס הבדיקה.",
+  photosIntro: (date: string) => `התמונות נלקחו מסרטוני הסיור בנכס${date ? ` (${date})` : ""} ומתמונות שצורפו לתיק.`,
   excludedBeyond: (n: number, r: string, max: string, reasons: string) => `בנוסף נבחנו ${n} עסקאות במרחק ${r} עד ${max} מהנכס שלא נכללו: ${reasons}. הפירוט המלא שמור במערכת.`,
   dataAsking: "מחירי היצע (נתוני עזר)",
   askingIntro: (pairs: number, s2a: string, area: string) =>
@@ -191,6 +193,7 @@ const en: ReportText = {
   },
   toc: "Contents",
   ch: {
+    photos: "Annex – photographs of the property",
     purpose: "Purpose of the opinion",
     dates: "Valuation date and site visit",
     documents: "Documents relied upon",
@@ -245,6 +248,7 @@ const en: ReportText = {
   dataExcluded: "Transactions examined and not included",
   excludedReason: { too_far: "outside the radius", too_old: "too far from the valuation date", over_adjusted: "too dissimilar – total adjustments above the limit", outlier: "out of line with local prices", beyond_max: "less similar; closer comparables were used", partial_sale: "sale of part of the rights" },
   excludedNone: "No further transactions were found within the search radius.",
+  photosIntro: (date: string) => `Pictures taken from the visit videos${date ? ` (${date})` : ""} and from photos added to the file.`,
   excludedBeyond: (n: number, r: string, max: string, reasons: string) => `A further ${n} transactions between ${r} and ${max} from the property were reviewed and not included: ${reasons}. The full list is kept in the system.`,
   dataAsking: "Asking prices (supporting data)",
   askingIntro: (pairs, s2a, area) => `${pairs} nearby sales were matched to their own adverts. Sale prices were on average ${s2a} below the last asking price, and registered area was ${area} of advertised area.`,

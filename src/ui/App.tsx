@@ -3,6 +3,8 @@ import { valuate, type ValuationResult } from "../engine/valuation";
 import type { Subject } from "../engine/types";
 import { createDataRequest, detectServer, getDataRequest, requestProgress, valuateRemote, type RequestDto } from "../data/apiClient";
 import { RequestsInbox } from "./RequestsInbox";
+import { CaptureTour, shotOrder } from "./CaptureTour";
+import { frameUrl, getCapture, type CaptureDto } from "../data/apiClient";
 import { DemoProvider, DEMO_VALUATION_DATE } from "../data/demo/demoProvider";
 import { DEMO_SUBJECT } from "../data/demo/demoSubject";
 import { STRINGS, type Lang } from "../i18n/strings";
@@ -10,11 +12,11 @@ import { LangContext, type Role } from "./context";
 import { PropertyForm } from "./Form";
 import { MapView } from "./MapView";
 import { Card, CompsTable, Disclaimer, AreaTable, BlendPanel, ListingsPanel, MarketPanel, RenewalPanel, TransportPanel, ValueCard, Warnings } from "./Panels";
-import { ShumaReport, type ReportMeta, type ReportStage } from "./ShumaReport";
+import { ShumaReport, type ReportMeta, type ReportPhoto, type ReportStage } from "./ShumaReport";
 import { DocumentsPanel } from "./DocumentsPanel";
 import { applyRegistry, documentFacts, type DocumentRecord } from "../data/documents";
 
-type Tab = "valuation" | "report" | "requests";
+type Tab = "valuation" | "report" | "visit" | "requests";
 
 /** The open data request for this browser tab's report, kept across reloads where storage works. */
 const REQ_KEY = "bs-request";
@@ -47,7 +49,19 @@ export function App() {
   const [docs, setDocs] = useState<DocumentRecord[]>([]);
   const [request, setRequest] = useState<RequestDto | null>(null);
   const [ordering, setOrdering] = useState(false);
-  const caseId = useMemo(() => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`.replace(/\./g, "")), []);
+  // The case (documents, adverts, visit films) survives a reload of this tab, and an opened
+  // order brings back its own case.
+  const [caseId, setCaseIdState] = useState<string>(() => {
+    try { const v = sessionStorage.getItem("bs-case"); if (v) return v; } catch { /* no storage */ }
+    return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`.replace(/\./g, "");
+  });
+  const setCaseId = (id: string) => { setCaseIdState(id); try { sessionStorage.setItem("bs-case", id); } catch { /* memory only */ } };
+  useEffect(() => { try { sessionStorage.setItem("bs-case", caseId); } catch { /* memory only */ } }, []);
+  const [captures, setCaptures] = useState<CaptureDto[]>([]);
+  useEffect(() => {
+    if (!live) return;
+    getCapture(caseId).then((r) => setCaptures(r.captures)).catch(() => setCaptures([]));
+  }, [live, caseId]);
   const t = STRINGS[lang];
   const [meta, setMeta] = useState<ReportMeta>(() => ({
     client: "",
@@ -89,10 +103,15 @@ export function App() {
 
   const orderFinal = async () => {
     setOrdering(true);
-    try { const r = await createDataRequest(effective); saveReqId(r.id); setRequest(r); }
+    try { const r = await createDataRequest(effective, caseId); saveReqId(r.id); setRequest(r); }
     catch (e) { setError((e as Error).message); }
     finally { setOrdering(false); }
   };
+  // Report annex: frames from the visit films (in shot order) and attached photos.
+  const photos: ReportPhoto[] = [
+    ...[...captures].sort((a, b) => shotOrder(a.shotId) - shotOrder(b.shotId)).flatMap((c) => c.frames.map((f) => ({ src: frameUrl(caseId, f), shotId: c.shotId, date: c.at.slice(0, 10) }))),
+    ...docs.filter((d) => d.kind === "photos" && d.url && /^image\//.test(d.mime)).map((d) => ({ src: d.url!, label: d.fileName })),
+  ];
   const stage: ReportStage | undefined = live
     ? request
       ? { status: request.status, ...requestProgress(request), finalAt: request.finalAt }
@@ -143,7 +162,7 @@ export function App() {
             </div>
           </div>
           <nav className="tabs" role="tablist">
-            {(["valuation", "report", ...(live && role !== "buyer" ? ["requests"] : [])] as Tab[]).map((k) => (
+            {(["valuation", "report", ...(live ? ["visit"] : []), ...(live && role !== "buyer" ? ["requests"] : [])] as Tab[]).map((k) => (
               <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
                 {t.tabs[k]}
               </button>
@@ -170,9 +189,12 @@ export function App() {
 
         {!live && <div className="demo-banner no-print">{t.demoBanner}</div>}
 
-        {tab === "requests" && live ? (
+        {tab === "visit" && live ? (
+          <CaptureTour caseId={caseId} subject={effective} onChange={setCaptures} />
+        ) : tab === "requests" && live ? (
           <RequestsInbox
             onOpen={(r) => {
+              if (r.caseId) setCaseId(r.caseId);
               setSubject(r.subject);
               setRequest(r);
               saveReqId(r.id);
@@ -241,7 +263,7 @@ export function App() {
                 </div>
               )}
             </aside>
-            {result && <ShumaReport r={result} subject={effective} tier={role} meta={metaShown} docs={docs} facts={facts} stage={stage} />}
+            {result && <ShumaReport r={result} subject={effective} tier={role} meta={metaShown} docs={docs} facts={facts} stage={stage} photos={photos} />}
           </main>
         )}
       </div>

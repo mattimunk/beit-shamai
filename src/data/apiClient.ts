@@ -58,11 +58,11 @@ export interface PlanItemDto {
   status: "pending" | "done" | "covered" | "truncated" | "split"; note?: string; parentId?: string;
 }
 export interface RequestDto {
-  id: string; createdAt: string; status: "preliminary" | "final"; finalAt?: string; subject: Subject; items: PlanItemDto[];
+  id: string; createdAt: string; status: "preliminary" | "final"; finalAt?: string; subject: Subject; caseId?: string; items: PlanItemDto[];
 }
 
-export async function createDataRequest(subject: Subject): Promise<RequestDto> {
-  const r = await fetch("/api/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject }) });
+export async function createDataRequest(subject: Subject, caseId?: string): Promise<RequestDto> {
+  const r = await fetch("/api/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject, caseId }) });
   const j = await r.json();
   if (!r.ok) throw new Error(j?.error ?? `request ${r.status}`);
   return j;
@@ -125,4 +125,40 @@ export async function parcelAt(lat: number, lng: number): Promise<{ block: numbe
   const r = await fetch(`/api/parcel-at?lat=${lat}&lng=${lng}`);
   if (!r.ok) return [];
   return r.json();
+}
+
+// ---- Visit capture -------------------------------------------------------------------------
+
+export interface VisitLayout { bedrooms: number; bathrooms: number; toilets: number; balconies: number; garden: boolean; storage: boolean; parking: boolean }
+export interface CaptureDto { shotId: string; media: "video" | "photo"; frames: string[]; duration?: number; at: string }
+
+export async function getCapture(caseId: string): Promise<{ layout: VisitLayout | null; captures: CaptureDto[] }> {
+  const r = await fetch(`/api/cases/${encodeURIComponent(caseId)}/capture`);
+  if (!r.ok) return { layout: null, captures: [] };
+  return r.json();
+}
+
+export async function saveVisitLayout(caseId: string, layout: VisitLayout) {
+  await fetch(`/api/cases/${encodeURIComponent(caseId)}/capture`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ layout }) });
+}
+
+export const frameUrl = (caseId: string, name: string) => `/api/cases/${encodeURIComponent(caseId)}/frames/${encodeURIComponent(name)}`;
+
+/** Upload one shot with progress (fetch has no upload progress, so XMLHttpRequest). */
+export function uploadShot(caseId: string, shotId: string, file: File, onProgress: (share: number) => void): Promise<CaptureDto> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/cases/${encodeURIComponent(caseId)}/capture/${shotId}`);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      let j: any = null;
+      try { j = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300 && j) resolve(j);
+      else reject(new Error(j?.error ?? `upload ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error("network error – check the connection and try again"));
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
 }

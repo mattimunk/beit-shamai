@@ -7,6 +7,7 @@ import { REPORT_TEXT, type Tier } from "../i18n/reportText";
 import { englishNis, hebrewNis } from "../i18n/numberWords";
 import { useT } from "./context";
 import type { DocumentFacts, DocumentRecord } from "../data/documents";
+import { useShotLabel } from "./CaptureTour";
 import { MapView } from "./MapView";
 
 export interface ReportMeta {
@@ -28,6 +29,9 @@ const ADJ_KEYS = ["time", "floor", "age", "condition", "view", "new_build", "rig
  * and reasons, coefficients, lettered considerations, step-by-step calculation, the
  * conventional conclusion with the amount in words, and declaration / signature.
  */
+/** A picture for the annex: a frame from the visit videos or an attached photo. */
+export interface ReportPhoto { src: string; label?: string; shotId?: string; date?: string }
+
 /** Where the Tax Authority data pull for this report stands (live reports only). */
 export interface ReportStage {
   status: "preliminary" | "final";
@@ -37,10 +41,11 @@ export interface ReportStage {
 }
 
 export function ShumaReport({
-  r, subject: s, tier, meta, docs, facts, stage,
-}: { r: ValuationResult; subject: Subject; tier: Tier; meta: ReportMeta; docs: DocumentRecord[]; facts: DocumentFacts; stage?: ReportStage }) {
+  r, subject: s, tier, meta, docs, facts, stage, photos = [],
+}: { r: ValuationResult; subject: Subject; tier: Tier; meta: ReportMeta; docs: DocumentRecord[]; facts: DocumentFacts; stage?: ReportStage; photos?: ReportPhoto[] }) {
   const { t, f, lang } = useT();
   const T = REPORT_TEXT[lang];
+  const shotLabel = useShotLabel();
   const rightsWord = T.rights[s.rights];
   const addr = `${s.address.street} ${s.address.number}, ${s.address.city}`;
   const parcel = s.parcel ? `${T.identRows.block} ${s.parcel.block} ${T.identRows.parcel} ${s.parcel.parcel}${s.parcel.subParcel ? ` ${T.identRows.sub} ${s.parcel.subParcel}` : ""}` : "";
@@ -365,6 +370,22 @@ export function ShumaReport({
     add("disclaimer", <p>{tier === "realtor" ? T.disclaimerRealtor : T.disclaimerBuyer}</p>);
   }
 
+  if (photos.length) {
+    const dates = [...new Set(photos.map((p) => p.date).filter(Boolean))] as string[];
+    add("photos", (
+      <>
+        <p className="small">{T.photosIntro(dates.length ? dates.map((d) => f.date(d)).join(", ") : "")}</p>
+        <div className="photo-grid">
+          {photos.map((p) => (
+            <figure key={p.src}>
+              <img src={p.src} alt={p.label ?? shotLabel(p.shotId ?? "")} />
+              <figcaption>{p.label ?? shotLabel(p.shotId ?? "")}</figcaption>
+            </figure>
+          ))}
+        </div>
+      </>
+    ));
+  }
   add("annex", <MapView r={r} center={s.location} stops={r.transport.stopsNearby} listings={r.market.activeListings} />);
 
   return (
