@@ -215,3 +215,21 @@ describe("city names from the address search", () => {
     expect(out.request.items.find((i) => i.id === q.id)!.status).toBe("split");
   });
 });
+
+describe("reuse across flat sizes", () => {
+  test("a smaller flat later: only the size slice not uploaded before is asked for", async () => {
+    const db = openDb(":memory:");
+    // Earlier work: 75–135 sqm uploaded for the whole year, in 3-week files.
+    for (let d = Date.parse("2025-07-01"); d < Date.parse("2026-06-24"); d += 21 * 864e5) {
+      const a = new Date(d).toISOString().slice(0, 10), b = new Date(d + 20 * 864e5).toISOString().slice(0, 10);
+      await importTaxExport(db, makeExport({ from: a, to: b, areaFrom: 75, areaTo: 135, total: 100, rows: 100 }), LAYER, undefined, fakeParcels);
+    }
+    const small = { ...DEMO_SUBJECT, address: { ...DEMO_SUBJECT.address, city: "תל אביב-יפו" }, area: { mode: "declared", area: 60 } } as Subject;
+    const req = createRequest(db, small, "2026-06-30");
+    const open = req.items.filter((i) => i.status === "pending");
+    expect(open.length).toBeGreaterThan(0);
+    // Every open search is below 75 sqm; the 75+ part of the band is closed from earlier uploads.
+    expect(open.every((i) => i.areaTo <= 74)).toBe(true);
+    expect(req.items.some((i) => i.status === "covered" && i.areaFrom >= 75)).toBe(true);
+  });
+});

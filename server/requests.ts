@@ -147,25 +147,57 @@ const dayIso = (d: number) => iso(Math.round(d) * DAY);
 export function reconcileRequest(db: Database, requestId: string, todayDays = Date.now() / DAY) {
   // Notes from before they became codes (free text) are dropped on open searches.
   db.query(`UPDATE plan_items SET note = NULL WHERE request_id = ? AND status = 'pending' AND note LIKE '% %'`).run(requestId);
-  const rows = (db.query(`SELECT * FROM plan_items WHERE request_id = ? AND status = 'pending'`).all(requestId) as any[]).map(rowToItem);
-  for (const it of rows) {
-    const pulls = cityPulls(db, it.city);
-    const { covered, gaps } = dateCoverage(it, pulls, todayDays);
-    if (!covered.length) {
-      const byArea = coveringPull(db, it); // adjacent area bands over the whole period
-      if (byArea) db.query(`UPDATE plan_items SET status = 'covered', pull_id = ? WHERE id = ?`).run(byArea, it.id);
-      continue;
-    }
-    if (!gaps.length) {
-      db.query(`UPDATE plan_items SET status = 'covered', pull_id = ?, note = NULL WHERE id = ?`).run(covered[0]!.id, it.id);
-      continue;
-    }
-    const base = { requestId, parentId: it.id, city: it.city, kind: it.kind, areaFrom: it.areaFrom, areaTo: it.areaTo };
-    for (const c of covered) insertItem(db, { ...base, id: crypto.randomUUID(), from: dayIso(c.a), to: dayIso(c.b), status: "covered", pullId: c.id });
-    for (const g of gaps) insertItem(db, { ...base, id: crypto.randomUUID(), from: dayIso(g.a), to: dayIso(g.b), status: "pending", note: "remaining" });
-    db.query(`UPDATE plan_items SET status = 'split', note = ? WHERE id = ?`).run("split", it.id);
+  // A few passes: an area split creates searches that the date check can then close.
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    const rows = (db.query(`SELECT * FROM plan_items WHERE request_id = ? AND status = 'pending'`).all(requestId) as any[]).map(rowToItem);
+    for (const it of rows) changed = reconcileItem(db, it, todayDays) || changed;
+    if (!changed) break;
   }
   refreshStatus(db, requestId);
+}
+
+/**
+ * Close one open search as far as uploads allow. Returns true if anything changed.
+ *  1. Area: where uploads cover only part of the search's size band (an earlier, different-
+ *     sized flat), split the band at their edges, so the covered slice can close.
+ *  2. Dates: within a band fully covered by uploads, close the covered dates and list the
+ *     remaining dates as new searches.
+ */
+function reconcileItem(db: Database, it: PlanItem, todayDays: number): boolean {
+  const pulls = cityPulls(db, it.city);
+  const from = Date.parse(it.from) / DAY, to = Date.parse(it.to) / DAY;
+  const overlapping = pulls.filter((p) => p.to >= from && p.from <= to && p.aTo >= it.areaFrom && p.aFrom <= it.areaTo);
+  const cuts = new Set<number>();
+  for (const p of overlapping) {
+    if (p.aFrom > it.areaFrom && p.aFrom <= it.areaTo) cuts.add(p.aFrom);
+    if (Number.isFinite(p.aTo) && p.aTo >= it.areaFrom && p.aTo < it.areaTo) cuts.add(p.aTo + 1);
+  }
+  const base = { requestId: it.requestId, parentId: it.id, city: it.city, kind: it.kind, from: it.from, to: it.to };
+  if (cuts.size) {
+    const edges = [it.areaFrom, ...[...cuts].sort((a, b) => a - b), it.areaTo + 1];
+    for (let k = 0; k + 1 < edges.length; k++) {
+      insertItem(db, { ...base, id: crypto.randomUUID(), areaFrom: edges[k]!, areaTo: edges[k + 1]! - 1, status: "pending", note: "area_slice" });
+    }
+    db.query(`UPDATE plan_items SET status = 'split', note = 'split_area' WHERE id = ?`).run(it.id);
+    return true;
+  }
+  const { covered, gaps } = dateCoverage(it, pulls, todayDays);
+  if (!covered.length) {
+    const byArea = coveringPull(db, it); // adjacent area bands over the whole period
+    if (!byArea) return false;
+    db.query(`UPDATE plan_items SET status = 'covered', pull_id = ? WHERE id = ?`).run(byArea, it.id);
+    return true;
+  }
+  if (!gaps.length) {
+    db.query(`UPDATE plan_items SET status = 'covered', pull_id = ?, note = NULL WHERE id = ?`).run(covered[0]!.id, it.id);
+    return true;
+  }
+  const b2 = { ...base, areaFrom: it.areaFrom, areaTo: it.areaTo };
+  for (const c of covered) insertItem(db, { ...b2, id: crypto.randomUUID(), from: dayIso(c.a), to: dayIso(c.b), status: "covered", pullId: c.id });
+  for (const g of gaps) insertItem(db, { ...b2, id: crypto.randomUUID(), from: dayIso(g.a), to: dayIso(g.b), status: "pending", note: "remaining" });
+  db.query(`UPDATE plan_items SET status = 'split', note = 'split' WHERE id = ?`).run(it.id);
+  return true;
 }
 
 /** Reconcile every open request (after an upload not tied to a search). */

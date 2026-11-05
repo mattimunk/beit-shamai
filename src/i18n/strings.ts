@@ -241,6 +241,8 @@ const he = {
     notes: {
       split: "הקבצים שהועלו מכסים חלק מהתאריכים – היתרה מופיעה כחיפושים חדשים.",
       remaining: "יתרת תאריכים של חיפוש שכוסה בחלקו.",
+      split_area: "חלק מטווח השטחים כבר קיים במאגר – רק החלק החסר מופיע לחיפוש.",
+      area_slice: "חלק מטווח השטחים של החיפוש המקורי.",
       truncated: (n: string) => `${n ? `${n} תוצאות – ` : ""}מעל מגבלת 150; פוצל לחיפושים קצרים יותר (כ-120 תוצאות כל אחד).`,
       cut_upload: "הקובץ שהועלה נחתך ב-150 תוצאות ולכן לא נספר. יש לצמצם את התאריכים ולהעלות שוב.",
       no_overlap: "הקובץ שהועלה אינו חופף לתאריכים או לשטח של שורה זו (הנתונים נשמרו).",
@@ -515,6 +517,8 @@ const en: Strings = {
     notes: {
       split: "Uploaded files cover part of the dates – the rest is listed as new searches.",
       remaining: "Remaining dates of a partly covered search.",
+      split_area: "Part of the size range is already in the library – only the missing part is listed.",
+      area_slice: "Part of the original search's size range.",
       truncated: (n: string) => `${n ? `${n} results – ` : ""}over the 150 limit; split into shorter searches (~120 results each).`,
       cut_upload: "The uploaded file was cut off at 150 results, so it does not count. Narrow the dates and upload again.",
       no_overlap: "The uploaded file does not overlap this row's dates or area (data was kept).",
