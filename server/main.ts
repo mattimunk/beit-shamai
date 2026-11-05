@@ -7,6 +7,7 @@
  *   POST /api/cases/:caseId/documents  upload one document (multipart: file, kind)
  *   GET  /api/cases/:caseId/documents  list a case's documents
  *   POST /api/valuate              { subject, facts?, date?, caseId? } → ValuationResult
+ *   GET  /api/parcel-at?lat&lng    nearest parcels (suggested block/parcel for an address)
  *   POST /api/cases/:caseId/adverts   Madlan/Yad2 print-to-PDF (multipart: file) → cards read
  *   GET  /api/cases/:caseId/adverts   the case's adverts and whether each is used
  *   POST /api/requests             { subject } → request with its Tax Authority search plan
@@ -34,6 +35,7 @@ import { geocode } from "./connectors/geocode";
 import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
 import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts";
+import { parcelsNear } from "./connectors/parcelsOpen";
 import { importDeals, parseCsv } from "./dealsImport";
 import { importTaxExport, relocateUnlocated } from "./taxImport";
 import { createRequest, getRequest, listRequests, reconcileAll, uploadToItem } from "./requests";
@@ -102,6 +104,12 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           const q = url.searchParams.get("q") ?? "";
           if (q.trim().length < 2) return json([]);
           return json(await geocode(q));
+        }
+
+        if (url.pathname === "/api/parcel-at" && req.method === "GET") {
+          const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return json({ error: "lat and lng required" }, 400);
+          return json(parcelsNear(db, lat, lng));
         }
 
         if (url.pathname === "/api/valuate" && req.method === "POST") {

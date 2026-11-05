@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { AddOn, AddOnType, AreaLevel, Direction, ParkingKind, Subject } from "../engine/types";
 import { useT } from "./context";
 import { AddressSearch } from "./AddressSearch";
+import { parcelAt } from "../data/apiClient";
 
 type Props = { subject: Subject; onChange: (s: Subject) => void; live?: boolean };
 
@@ -43,6 +44,11 @@ const DIRS: Direction[] = ["N", "S", "E", "W"];
 export function PropertyForm({ subject: s, onChange, live }: Props) {
   const { t } = useT();
   const set = (patch: Partial<Subject>) => onChange({ ...s, ...patch });
+  // For updates that land after an await: apply to the latest subject, not a stale copy.
+  const latest = useRef({ s, onChange });
+  latest.current = { s, onChange };
+  const onChangeLatest = useRef((patch: Partial<Subject>) => latest.current.onChange({ ...latest.current.s, ...patch }));
+  const [parcelHint, setParcelHint] = useState<string | null>(null);
   const setAddOn = (i: number, patch: Partial<AddOn>) =>
     set({ addOns: s.addOns.map((a, k) => (k === i ? { ...a, ...patch } : a)) });
   const levels = s.area.mode === "measured" ? s.area.levels : [];
@@ -56,12 +62,21 @@ export function PropertyForm({ subject: s, onChange, live }: Props) {
         {live && (
           <div className="wide">
             <AddressSearch
-              onPick={(h) =>
+              onPick={async (h) => {
+                // A new address: drop the previous block/parcel (e.g. the demo's), then suggest
+                // one from the national parcel layer.
                 set({
                   location: { lat: h.lat, lng: h.lng },
                   address: { city: h.city ?? s.address.city, street: h.street ?? s.address.street, number: h.number ?? "" },
-                })
-              }
+                  parcel: undefined,
+                });
+                setParcelHint(null);
+                const near = await parcelAt(h.lat, h.lng).catch(() => []);
+                if (near[0]) {
+                  setParcelHint(near.map((p) => `${p.block}/${p.parcel}`).join(", "));
+                  onChangeLatest.current({ parcel: { block: String(near[0].block), parcel: String(near[0].parcel) } });
+                }
+              }}
             />
           </div>
         )}
@@ -83,6 +98,7 @@ export function PropertyForm({ subject: s, onChange, live }: Props) {
         <Field label={t.subParcel}>
           <input value={s.parcel?.subParcel ?? ""} onChange={(e) => set({ parcel: { ...(s.parcel ?? { block: "", parcel: "" }), subParcel: e.target.value } })} />
         </Field>
+        {parcelHint && <p className="wide small muted parcel-hint">{t.parcelHint(parcelHint)}</p>}
         <Field label={t.rights}>
           <select value={s.rights} onChange={(e) => set({ rights: e.target.value as Subject["rights"] })}>
             <option value="ownership">{t.rightsOpt.ownership}</option>

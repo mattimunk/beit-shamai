@@ -220,6 +220,7 @@ const he = {
   modeLive: "נתונים חיים",
   liveError: "השרת לא החזיר אומדן:",
   liveEmpty: "לכתובת זו עדיין אין נתונים בשרת – העיר לא הוגדרה או שהסנכרון טרם רץ.",
+  parcelHint: (list: string) => `גוש/חלקה הוצעו לפי מפת החלקות הארצית (הקרובות: ${list}). יש לאמת מול נסח טאבו ולהשלים תת-חלקה.`,
   req: {
     order: "הזמנת דו״ח סופי",
     orderHelp: "הדו״ח הנוכחי מקדמי. בהזמנה נשלפים נתוני עסקאות מרשות המסים (בדרך כלל תוך יום עבודה) והדו״ח מתעדכן לסופי.",
@@ -493,6 +494,7 @@ const en: Strings = {
   modeLive: "Live data",
   liveError: "The server returned no estimate:",
   liveEmpty: "No data for this address on the server yet – the city is not configured or the sync has not run.",
+  parcelHint: (list: string) => `Block/parcel suggested from the national parcel map (nearest: ${list}). Confirm against the land-registry extract and add the sub-parcel.`,
   req: {
     order: "Order the final report",
     orderHelp: "This report is preliminary. Ordering pulls deal records from the Tax Authority (usually within a working day) and the report becomes final.",

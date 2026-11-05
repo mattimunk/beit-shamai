@@ -151,3 +151,20 @@ export async function syncParcels(db: Database, dir: string, url = PARCELS_URL, 
     rmSync(path, { force: true });
   }
 }
+
+/**
+ * Parcels whose centre is nearest a point (e.g. a geocoded address), closest first.
+ * Centres are of bounding boxes, so the nearest one is a suggestion to confirm in the
+ * land-registry extract, not an identification.
+ */
+export function parcelsNear(db: Database, lat: number, lng: number, maxM = 80, limit = 3): { block: number; parcel: number; distanceM: number }[] {
+  ensureParcelPoints(db);
+  const dLat = maxM / 111320, dLng = maxM / (111320 * Math.cos((lat * Math.PI) / 180));
+  const rows = db.query(`SELECT block, parcel, lat, lng FROM parcel_points WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?`)
+    .all(lat - dLat, lat + dLat, lng - dLng, lng + dLng) as { block: number; parcel: number; lat: number; lng: number }[];
+  return rows
+    .map((r) => ({ block: r.block, parcel: r.parcel, distanceM: Math.round(Math.hypot((r.lat - lat) * 111320, (r.lng - lng) * 111320 * Math.cos((lat * Math.PI) / 180))) }))
+    .filter((r) => r.distanceM <= maxM)
+    .sort((a, b) => a.distanceM - b.distanceM)
+    .slice(0, limit);
+}

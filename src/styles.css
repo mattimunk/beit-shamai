@@ -334,3 +334,10 @@ label.button { cursor: pointer; display: inline-block; }
 table.plan tr.st-split td:not(:last-child) { color: var(--c-ink-2); }
 .open-report { margin-inline-start: auto; }
 .inline { display: inline-flex; align-items: center; gap: 6px; }
+.parcel-hint { margin: -4px 0 4px; }
+/* Fit the wide comparables table on an A4 page when printing. */
+@media print {
+  .shuma .table-scroll { overflow: visible; }
+  .shuma .grid-table.compact { width: 100%; font-size: 7.5pt; }
+  .shuma .grid-table.compact th, .shuma .grid-table.compact td { padding: 2px 3px; }
+}

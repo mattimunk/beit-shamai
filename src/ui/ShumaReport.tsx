@@ -171,10 +171,21 @@ export function ShumaReport({
   ));
 
   const months = DEFAULT_CONFIG.comparables.maxMonths;
-  const excluded = c.rejected
+  // Exclusions inside the radius actually used are listed one by one; the rest of the
+  // search area is summarised by reason (in Tel Aviv that can be hundreds of partial sales).
+  const allExcluded = c.rejected
     .filter((x) => x.reason !== "too_old" && x.reason !== "too_far")
     .map((x) => ({ ...x, d: distanceM(s.location, x.deal.location) }))
     .sort((a, b) => a.d - b.d);
+  const excluded = allExcluded.filter((x) => x.d <= c.radiusM);
+  const beyond = allExcluded.filter((x) => x.d > c.radiusM);
+  const beyondByReason = Object.entries(
+    beyond.reduce<Record<string, number>>((m, x) => ((m[x.reason] = (m[x.reason] ?? 0) + 1), m), {}),
+  ).sort((a, b) => b[1] - a[1]);
+  const maxBeyond = beyond.length ? Math.max(...beyond.map((x) => x.d)) : 0;
+  const addrOf = (d: { address: { street: string; number: string }; parcel?: { block: string; parcel: string } }) =>
+    d.address.street ? `${d.address.street} ${d.address.number}`.trim() : d.parcel ? `${T.identRows.block} ${d.parcel.block} ${T.identRows.parcel} ${d.parcel.parcel}` : "—";
+  const showAddrCol = c.used.some((x) => x.deal.address.street);
   add("data", (
     <>
       <h4>{T.dataSelected}</h4>
@@ -183,7 +194,7 @@ export function ShumaReport({
         <table className="grid-table compact">
           <thead>
             <tr>
-              <th>{T.cols.n}</th><th>{T.cols.date}</th><th>{T.cols.address}</th><th>{T.cols.gush}</th>
+              <th>{T.cols.n}</th><th>{T.cols.date}</th>{showAddrCol && <th>{T.cols.address}</th>}<th>{T.cols.gush}</th>
               <th className="num">{T.cols.rooms}</th><th className="num">{T.cols.floor}</th><th className="num">{T.cols.area}</th>
               <th className="num">{T.cols.price}</th><th className="num">{T.cols.ppsqm}</th>
               {ADJ_KEYS.map((k) => <th key={k} className="num">{T.adjCols[k]}</th>)}
@@ -195,7 +206,7 @@ export function ShumaReport({
               <tr key={x.deal.id}>
                 <td>{i + 1}</td>
                 <td>{f.dnum(x.deal.date)}</td>
-                <td><bdi>{x.deal.address.street} {x.deal.address.number}</bdi></td>
+                {showAddrCol && <td><bdi>{x.deal.address.street} {x.deal.address.number}</bdi></td>}
                 <td>{x.deal.parcel ? `${x.deal.parcel.block}/${x.deal.parcel.parcel}` : "—"}</td>
                 <td className="num">{x.deal.rooms}</td>
                 <td className="num">{x.deal.floor ?? "—"}</td>
@@ -222,7 +233,7 @@ export function ShumaReport({
             {excluded.map((x) => (
               <tr key={x.deal.id}>
                 <td>{f.dnum(x.deal.date)}</td>
-                <td><bdi>{x.deal.address.street} {x.deal.address.number}</bdi></td>
+                <td><bdi>{addrOf(x.deal)}</bdi></td>
                 <td className="num">{x.deal.area}</td>
                 <td className="num">{f.int(x.deal.price)}</td>
                 <td className="num">{f.dist(x.d)}</td>
@@ -232,6 +243,11 @@ export function ShumaReport({
           </tbody>
         </table>
       ) : <p>{T.excludedNone}</p>}
+      {beyond.length > 0 && (
+        <p className="small">
+          {T.excludedBeyond(beyond.length, f.dist(c.radiusM), f.dist(maxBeyond), beyondByReason.map(([r, n]) => `${n} – ${T.excludedReason[r as keyof typeof T.excludedReason]}`).join("; "))}
+        </p>
+      )}
       {le && (
         <>
           <h4>{T.dataAsking}</h4>

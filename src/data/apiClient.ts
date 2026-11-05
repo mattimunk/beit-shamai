@@ -119,3 +119,10 @@ export async function uploadTaxExportAny(token: string, file: File) {
   if (!r.ok) throw new Error(j?.error ?? `upload ${r.status}`);
   return j as { stored: number; rows: number; partial: number; unlocated: number; truncated: boolean; totalReported?: number };
 }
+
+/** Suggested block/parcel for a point, from the national parcel layer on the server. */
+export async function parcelAt(lat: number, lng: number): Promise<{ block: number; parcel: number; distanceM: number }[]> {
+  const r = await fetch(`/api/parcel-at?lat=${lat}&lng=${lng}`);
+  if (!r.ok) return [];
+  return r.json();
+}
