@@ -93,3 +93,27 @@ describe("accounts over HTTP", () => {
     expect((await fetch(`${base}/api/me`, { headers: { cookie } })).status).toBe(401);
   });
 });
+
+describe("phone numbers", () => {
+  test("country code + number ⇄ international format; Israeli leading 0 dropped", async () => {
+    const { joinPhone, splitPhone, phoneLooksValid } = await import("../src/ui/PhoneField");
+    expect(joinPhone("972", "050-123 4567")).toBe("+972501234567");
+    expect(joinPhone("1", "(212) 555-0100")).toBe("+12125550100");
+    expect(splitPhone("+972501234567")).toEqual({ code: "972", number: "501234567" });
+    expect(splitPhone("+380441234567")).toEqual({ code: "380", number: "441234567" }); // not +38…
+    expect(splitPhone(undefined)).toEqual({ code: "972", number: "" });
+    expect(phoneLooksValid("972", "050-1234567")).toBe(true);
+    expect(phoneLooksValid("972", "0501234")).toBe(false);
+    expect(phoneLooksValid("972", "")).toBe(true); // optional
+  });
+
+  test("server stores international format, rejects junk, and can clear it", () => {
+    const db = openDb(":memory:");
+    db.exec(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT, phone TEXT, role TEXT, agency TEXT, license TEXT, marketing_consent INTEGER DEFAULT 0, consent_at TEXT, created_at TEXT, last_login TEXT)`);
+    db.query(`INSERT INTO users (id, email, created_at) VALUES ('u1', 'x@y.co', '2026-01-01')`).run();
+    expect(updateProfile(db, "u1", { phone: "+972 50-123-4567" }).phone).toBe("+972501234567");
+    expect(() => updateProfile(db, "u1", { phone: "12ab" })).toThrow("invalid phone");
+    expect(updateProfile(db, "u1", { name: "x" }).phone).toBe("+972501234567"); // untouched
+    expect(updateProfile(db, "u1", { phone: "" }).phone).toBeUndefined();
+  });
+});

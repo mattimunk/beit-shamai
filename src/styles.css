@@ -435,3 +435,8 @@ html, body { overflow-x: hidden; }
   .controls { order: 2; gap: 6px; }
   .user-chip .ghost { max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+.phone-row { display: flex; gap: 6px; }
+.phone-row select { flex: 0 0 auto; width: auto; max-width: 48%; }
+.phone-row input { flex: 1; }
+.warn-text { color: var(--c-warn); }
+input[aria-invalid="true"] { border-color: var(--c-warn); }

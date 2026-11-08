@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { requestSignInCode, saveProfile, verifySignIn, type MeDto, type UserDto, type UserRole } from "../data/apiClient";
 import { useT } from "./context";
+import { PhoneField, phoneLooksValid, splitPhone } from "./PhoneField";
 
 /** Sign in or sign up: email → 6-digit code. */
 export function SignIn({ onSignedIn }: { onSignedIn: (me: MeDto, isNew: boolean) => void }) {
@@ -80,7 +81,7 @@ export function Profile({ me, onSaved, onCancel }: { me: MeDto; onSaved: (me: Me
         <h2>{A.profileTitle}</h2>
         <p className="muted small">{me.user.email}</p>
         <label className="field"><span>{A.name}</span><input value={p.name ?? ""} onChange={(e) => set({ name: e.target.value })} autoComplete="name" /></label>
-        <label className="field"><span>{A.phone}</span><input value={p.phone ?? ""} onChange={(e) => set({ phone: e.target.value })} inputMode="tel" autoComplete="tel" dir="ltr" /></label>
+        <PhoneField label={A.phone} value={me.user.phone} onChange={(v) => setP((x) => ({ ...x, phone: v }))} />
         <div className="field">
           <span>{A.iAm}</span>
           <div className="role-pick">
@@ -97,7 +98,7 @@ export function Profile({ me, onSaved, onCancel }: { me: MeDto; onSaved: (me: Me
         </label>
         <p className="small muted">{A.privacy}</p>
         <div className="row-actions">
-          <button className="primary" onClick={save} disabled={busy || !p.role || !(p.name ?? "").trim()}>{A.save}</button>
+          <button className="primary" onClick={save} disabled={busy || !p.role || !(p.name ?? "").trim() || !phoneLooksValid(splitPhone(p.phone).code, splitPhone(p.phone).number)}>{A.save}</button>
           {onCancel && <button className="ghost" onClick={onCancel}>{A.cancel}</button>}
         </div>
         {error && <p className="warnings small">{error}</p>}

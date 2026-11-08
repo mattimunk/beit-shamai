@@ -138,16 +138,22 @@ export function sessionCookie(token: string, req: Request, clear = false): strin
 
 export interface ProfileInput { name?: string; phone?: string; role?: string; agency?: string; license?: string; marketingConsent?: boolean }
 
-export function updateProfile(db: Database, userId: string, p: ProfileInput): User {
+export function updateProfile(db: Database, userId: string, pIn: ProfileInput): User {
+  let p = pIn;
   const cur = getUser(db, userId);
   if (!cur) throw new Error("no such user");
   const role = p.role !== undefined ? (USER_ROLES.includes(p.role as UserRole) ? p.role : null) : cur.role ?? null;
   const clip = (s: string | undefined, n: number) => (s === undefined ? undefined : s.trim().slice(0, n) || null);
   const consent = p.marketingConsent ?? cur.marketingConsent;
+  if (p.phone !== undefined) {
+    const ph = p.phone.replace(/[^\d+]/g, "");
+    if (ph && !/^\+\d{7,16}$/.test(ph)) throw new Error("invalid phone");
+    p = { ...p, phone: ph };
+  }
   db.query(
-    `UPDATE users SET name = COALESCE(?, name), phone = COALESCE(?, phone), role = ?, agency = COALESCE(?, agency), license = COALESCE(?, license),
+    `UPDATE users SET name = COALESCE(?, name), phone = CASE WHEN ? THEN ? ELSE phone END, role = ?, agency = COALESCE(?, agency), license = COALESCE(?, license),
        marketing_consent = ?, consent_at = CASE WHEN ? != marketing_consent THEN ? ELSE consent_at END WHERE id = ?`,
-  ).run(clip(p.name, 100) ?? null, clip(p.phone, 30) ?? null, role, clip(p.agency, 100) ?? null, clip(p.license, 30) ?? null,
+  ).run(clip(p.name, 100) ?? null, p.phone !== undefined ? 1 : 0, p.phone || null, role, clip(p.agency, 100) ?? null, clip(p.license, 30) ?? null,
     consent ? 1 : 0, consent ? 1 : 0, new Date().toISOString(), userId);
   return getUser(db, userId)!;
 }
