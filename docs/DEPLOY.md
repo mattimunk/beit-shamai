@@ -108,6 +108,17 @@ cd beit-shamai && ./deploy/update.sh
 
 Data lives in the Docker volume `appdata` and survives updates. For off-site backups, copy `/data/backups` to a Cloud Storage bucket. That's one `gsutil rsync` line in cron, and Claude can add it.
 
+## Accounts and email
+
+Users sign in with a 6-digit code sent to their email (no passwords). Admins are the addresses
+in `ADMIN_EMAILS` in `.env`; they see the "Admin" pipeline of all properties and the data-requests
+inbox without typing the admin code.
+
+Until an email service is configured, codes are written to the server log
+(`sudo docker compose logs app | grep -A3 "\[mail\]"`), and an admin can sign in by typing the
+server's `ADMIN_TOKEN` as the code. To send real email, verify your domain with Resend or Brevo
+and set `RESEND_API_KEY` (or `BREVO_API_KEY`) and `MAIL_FROM` in `.env`, then `./deploy/update.sh`.
+
 ## Parcel layer
 
 Tax Authority deals are placed on the map from the Survey of Israel's national parcel layer

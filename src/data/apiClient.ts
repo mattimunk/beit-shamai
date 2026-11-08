@@ -76,7 +76,7 @@ export async function getDataRequest(id: string): Promise<RequestDto> {
 }
 
 export async function listDataRequests(token: string, all = false): Promise<RequestDto[]> {
-  const r = await fetch(`/api/requests${all ? "?all=1" : ""}`, { headers: { authorization: `Bearer ${token}` } });
+  const r = await fetch(`/api/requests${all ? "?all=1" : ""}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
   const j = await r.json();
   if (!r.ok) throw new Error(j?.error ?? `requests ${r.status}`);
   return j;
@@ -85,7 +85,7 @@ export async function listDataRequests(token: string, all = false): Promise<Requ
 export async function uploadTaxExport(token: string, requestId: string, itemId: string, file: File) {
   const form = new FormData();
   form.append("file", file);
-  const r = await fetch(`/api/requests/${requestId}/items/${itemId}/upload`, { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
+  const r = await fetch(`/api/requests/${requestId}/items/${itemId}/upload`, { method: "POST", headers: token ? { authorization: `Bearer ${token}` } : {}, body: form });
   const j = await r.json();
   if (!r.ok) throw new Error(j?.error ?? `upload ${r.status}`);
   return j as { import: { stored: number; rows: number; partial: number; unlocated: number }; mismatch: string[]; item: PlanItemDto; request: RequestDto };
@@ -114,7 +114,7 @@ export async function uploadAdvertPrint(caseId: string, file: File, city: string
 export async function uploadTaxExportAny(token: string, file: File) {
   const form = new FormData();
   form.append("file", file);
-  const r = await fetch("/api/tax/import", { method: "POST", headers: { authorization: `Bearer ${token}` }, body: form });
+  const r = await fetch("/api/tax/import", { method: "POST", headers: token ? { authorization: `Bearer ${token}` } : {}, body: form });
   const j = await r.json();
   if (!r.ok) throw new Error(j?.error ?? `upload ${r.status}`);
   return j as { stored: number; rows: number; partial: number; unlocated: number; truncated: boolean; totalReported?: number };
@@ -192,3 +192,36 @@ export function rememberCase(id: string) {
 
 /** Link that opens only the guided filming for one property (agent or buyer, on a phone). */
 export const visitLink = (caseId: string) => `${location.origin}/?visit=${encodeURIComponent(caseId)}`;
+
+// ---- Accounts ---------------------------------------------------------------------------------
+
+export type UserRole = "buyer" | "seller" | "agent" | "appraiser" | "other";
+export interface UserDto { id: string; email: string; name?: string; phone?: string; role?: UserRole; agency?: string; license?: string; marketingConsent: boolean }
+export interface MeDto { user: UserDto; isAdmin: boolean }
+export type CaseStatus = "draft" | "submitted" | "data" | "documents" | "review" | "done";
+export interface PipelineCase extends CaseSummaryDto {
+  status: CaseStatus; submittedAt?: string; statusAt?: string;
+  owner?: { id: string; email: string; name?: string; role?: string };
+  request?: { id: string; status: string; done: number; total: number };
+}
+
+async function jsonOrThrow<T>(r: Response): Promise<T> {
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j as any)?.error ?? `HTTP ${r.status}`);
+  return j as T;
+}
+const post = (url: string, body?: unknown, method = "POST") =>
+  fetch(url, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+
+export const requestSignInCode = (email: string, lang: "he" | "en") => post("/api/auth/code", { email, lang }).then((r) => jsonOrThrow<{ emailed: boolean }>(r));
+export const verifySignIn = (email: string, code: string) => post("/api/auth/verify", { email, code }).then((r) => jsonOrThrow<MeDto & { isNew: boolean }>(r));
+export const signOut = () => post("/api/auth/logout");
+export async function getMe(): Promise<MeDto | null> {
+  const r = await fetch("/api/me");
+  return r.ok ? r.json() : null;
+}
+export const saveProfile = (p: Partial<UserDto>) => post("/api/me", p, "PUT").then((r) => jsonOrThrow<MeDto>(r));
+export const myCases = () => fetch("/api/my/cases").then((r) => jsonOrThrow<PipelineCase[]>(r));
+export const submitCase = (id: string) => post(`/api/cases/${encodeURIComponent(id)}/submit`).then((r) => jsonOrThrow<{ case: { status: CaseStatus }; request: RequestDto | null }>(r));
+export const adminCases = (status?: CaseStatus) => fetch(`/api/admin/cases${status ? `?status=${status}` : ""}`).then((r) => jsonOrThrow<PipelineCase[]>(r));
+export const setCaseStatusAdmin = (id: string, status: CaseStatus) => post(`/api/admin/cases/${encodeURIComponent(id)}`, { status }, "PUT").then((r) => jsonOrThrow(r));

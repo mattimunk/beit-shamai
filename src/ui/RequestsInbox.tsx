@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { listDataRequests, requestProgress, uploadTaxExport, uploadTaxExportAny, type PlanItemDto, type RequestDto } from "../data/apiClient";
 import { useT } from "./context";
 
@@ -16,7 +16,7 @@ function keepToken(v: string) {
  * Inbox for whoever has Tax Authority access: open requests, each with the exact searches
  * to run in the "מידע נדל"ן" system and an upload button per search.
  */
-export function RequestsInbox({ onOpen }: { onOpen?: (r: RequestDto) => void }) {
+export function RequestsInbox({ onOpen, session = false }: { onOpen?: (r: RequestDto) => void; session?: boolean }) {
   const { t } = useT();
   const R = t.req;
   const [token, setToken] = useState(readToken);
@@ -54,6 +54,9 @@ export function RequestsInbox({ onOpen }: { onOpen?: (r: RequestDto) => void }) 
     return typeof v === "function" ? v(arg) : v ?? n;
   };
 
+  // A signed-in admin needs no code: the session cookie is enough.
+  useEffect(() => { if (session) load(); }, [session]);
+
   const criteriaText = (it: PlanItemDto) =>
     `${R.cols.city}: ${it.city}\n${R.cols.kind}: ${it.kind}\n${R.cols.period}: ${dmy(it.from)} – ${dmy(it.to)}\n${R.cols.area}: ${it.areaFrom} – ${it.areaTo}`;
 
@@ -78,17 +81,22 @@ export function RequestsInbox({ onOpen }: { onOpen?: (r: RequestDto) => void }) 
       <section className="card">
         <h2>{R.inbox}</h2>
         <p className="muted">{R.howTo} <a href={TAX_SITE} target="_blank" rel="noreferrer">{R.openSite}</a></p>
-        <div className="inbox-login">
+        {!session && <div className="inbox-login">
           <label className="field">
             <span>{R.token}</span>
             <input type="password" value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" />
           </label>
-          <button className="primary" onClick={() => load()} disabled={!token}>{R.load}</button>
+          <button className="primary" onClick={() => load()} disabled={!token && !session}>{R.load}</button>
           <label className="inline small">
             <input type="checkbox" checked={showAll} onChange={(e) => { setShowAll(e.target.checked); if (token) load(e.target.checked); }} /> {R.showAll}
           </label>
           <span className="muted small">{R.tokenHelp}</span>
-        </div>
+        </div>}
+        {session && (
+          <label className="inline small">
+            <input type="checkbox" checked={showAll} onChange={(e) => { setShowAll(e.target.checked); load(e.target.checked); }} /> {R.showAll}
+          </label>
+        )}
         {error && <div className="warnings">{error}</div>}
         {list && (
           <div className="upload-any">

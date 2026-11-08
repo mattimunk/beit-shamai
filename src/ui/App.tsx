@@ -5,7 +5,9 @@ import { createDataRequest, detectServer, getDataRequest, requestProgress, valua
 import { RequestsInbox } from "./RequestsInbox";
 import { CaptureTour, shotOrder } from "./CaptureTour";
 import { frameUrl, getCapture, getCaseFile, rememberCase, saveCaseFile, type CaptureDto } from "../data/apiClient";
-import { PropertyBar } from "./PropertyBar";
+import { SignIn, Profile } from "./Account";
+import { AdminPipeline, MyProperties, PropertyStrip } from "./Properties";
+import { getMe, signOut, submitCase, type CaseStatus, type MeDto } from "../data/apiClient";
 import { VisitShare } from "./VisitShare";
 
 /** A new property file starts with neutral details – nothing from the demo flat that could
@@ -32,7 +34,7 @@ import { ShumaReport, type ReportMeta, type ReportPhoto, type ReportStage } from
 import { DocumentsPanel } from "./DocumentsPanel";
 import { applyRegistry, documentFacts, type DocumentRecord } from "../data/documents";
 
-type Tab = "valuation" | "report" | "visit" | "requests";
+type Tab = "mine" | "valuation" | "report" | "visit" | "admin" | "requests";
 
 /** The open data request for this browser tab's report, kept across reloads where storage works. */
 const REQ_KEY = "bs-request";
@@ -77,12 +79,25 @@ export function App() {
   useEffect(() => { try { sessionStorage.setItem("bs-case", caseId); } catch { /* memory only */ } }, []);
   const [captures, setCaptures] = useState<CaptureDto[]>([]);
   const [filesKey, setFilesKey] = useState(0);
+  // Signed-in user (live mode). undefined = not checked yet; null = signed out.
+  const [me, setMe] = useState<MeDto | null | undefined>(undefined);
+  const [editProfile, setEditProfile] = useState(false);
+  const [caseStatus, setCaseStatus] = useState<CaseStatus>("draft");
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!live) return;
+    getMe().then((m) => { setMe(m); if (m) setTab((t0) => (t0 === "valuation" && !sessionStorage.getItem("bs-case-open") ? "mine" : t0)); }).catch(() => setMe(null));
+  }, [live]);
+  // What a signed-in user sees of the report follows their role; admins can switch.
+  const userTier: Role | null = me && !me.isAdmin ? (me.user.role === "agent" ? "realtor" : me.user.role === "appraiser" ? "appraiser" : "buyer") : null;
+  useEffect(() => { if (userTier && role !== userTier) setRoleState(userTier); }, [userTier]);
   const [savedAddress, setSavedAddress] = useState<string | null>(null);
 
   // Live mode: load this tab's property file from the server, if it has one.
   useEffect(() => {
     if (!live) return;
-    getCaseFile(caseId).then((c) => { if (c) { setSubject(c.subject); setSavedAddress(addressLine(c.subject)); } }).catch(() => {});
+    getCaseFile(caseId).then((c) => { if (c) { setSubject(c.subject); setSavedAddress(addressLine(c.subject)); setCaseStatus(((c as any).status ?? "draft") as CaseStatus); } }).catch(() => {});
   }, [live, caseId]);
 
   // Save the property's details to its file as they are edited (once it has an address).
@@ -103,6 +118,8 @@ export function App() {
     const c = await getCaseFile(id).catch(() => null);
     setCaseId(id);
     if (c) setSubject(c.subject);
+    setCaseStatus(((c as any)?.status ?? "draft") as CaseStatus);
+    try { sessionStorage.setItem("bs-case-open", "1"); } catch { /* memory only */ }
     setSavedAddress(c ? addressLine(c.subject) : null);
     setDocs([]);
     setRequest(null);
@@ -110,10 +127,24 @@ export function App() {
     rememberCase(id);
     setTab("valuation");
   };
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await saveCaseFile(caseId, subject);
+      const r = await submitCase(caseId);
+      setCaseStatus(r.case.status);
+      if (r.request) { setRequest(r.request); saveReqId(r.request.id); }
+      setNotice(t.pipeline.submitted);
+      setFilesKey((k) => k + 1);
+    } catch (e) { setError((e as Error).message); }
+    finally { setSubmitting(false); }
+  };
   const newCase = () => {
     const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`.replace(/\./g, "");
     setCaseId(id);
     setSubject(newSubject());
+    setCaseStatus("draft");
+    try { sessionStorage.setItem("bs-case-open", "1"); } catch { /* memory only */ }
     setSavedAddress(null);
     setDocs([]);
     setCaptures([]);
@@ -229,20 +260,33 @@ export function App() {
             </div>
           </div>
           <nav className="tabs" role="tablist">
-            {(["valuation", "report", ...(live ? ["visit"] : []), ...(live && role !== "buyer" ? ["requests"] : [])] as Tab[]).map((k) => (
+            {(live
+              ? me
+                ? ["mine", "valuation", "report", "visit", ...(me.isAdmin ? ["admin", "requests"] : [])]
+                : []
+              : ["valuation", "report"]
+            ).map((k) => k as Tab).map((k) => (
               <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
                 {t.tabs[k]}
               </button>
             ))}
           </nav>
           <div className="controls">
-            <div className="segmented" role="radiogroup" aria-label="role">
+            {live && me && (
+              <div className="user-chip">
+                <button className="ghost" onClick={() => setEditProfile(true)} title={me.user.email}>
+                  {me.user.name || me.user.email}{me.user.role ? ` · ${t.account.roles[me.user.role]}` : ""}{me.isAdmin ? " · admin" : ""}
+                </button>
+                <button className="ghost" onClick={async () => { await signOut(); setMe(null); setTab("valuation"); }}>{t.account.signOut}</button>
+              </div>
+            )}
+            {(!live || me?.isAdmin) && <div className="segmented" role="radiogroup" aria-label="role">
               {(["buyer", "realtor", "appraiser"] as Role[]).map((k) => (
                 <button key={k} role="radio" aria-checked={role === k} className={role === k ? "active" : ""} onClick={() => setRole(k)}>
                   {t.role[k]}
                 </button>
               ))}
-            </div>
+            </div>}
             {serverAvailable && (
               <div className="segmented" role="radiogroup" aria-label="data">
                 <button role="radio" aria-checked={!live} className={!live ? "active" : ""} onClick={() => { setLive(false); setSubject(DEMO_SUBJECT); }}>{t.modeDemo}</button>
@@ -255,15 +299,29 @@ export function App() {
         </header>
 
         {!live && <div className="demo-banner no-print">{t.demoBanner}</div>}
-        {live && <PropertyBar caseId={caseId} address={addressLine(effective)} onOpen={openCase} onNew={newCase} refreshKey={filesKey} />}
+        {live && me && ["valuation", "report", "visit"].includes(tab) && (
+          <PropertyStrip address={addressLine(effective)} status={caseStatus} onBack={() => setTab("mine")} onSubmit={submit} submitting={submitting} />
+        )}
+        {notice && <div className="notice no-print" onClick={() => setNotice(null)}>{notice}</div>}
 
-        {tab === "visit" && live ? (
+        {live && me === undefined ? (
+          <main className="account"><div className="card muted">{t.loading}</div></main>
+        ) : live && me === null ? (
+          <SignIn onSignedIn={(m, isNew) => { setMe(m); setEditProfile(isNew || !m.user.role); setTab("mine"); }} />
+        ) : live && me && (editProfile || !me.user.role) ? (
+          <Profile me={me} onSaved={(m) => { setMe(m); setEditProfile(false); }} onCancel={me.user.role ? () => setEditProfile(false) : undefined} />
+        ) : tab === "mine" && live ? (
+          <MyProperties onOpen={openCase} onNew={newCase} refreshKey={filesKey} />
+        ) : tab === "admin" && live && me?.isAdmin ? (
+          <AdminPipeline onOpen={openCase} />
+        ) : tab === "visit" && live ? (
           <div className="visit-wrap">
             <VisitShare caseId={caseId} address={addressLine(effective)} />
             <CaptureTour key={caseId} caseId={caseId} subject={effective} onChange={setCaptures} />
           </div>
         ) : tab === "requests" && live ? (
           <RequestsInbox
+            session={!!me?.isAdmin}
             onOpen={(r) => {
               if (r.caseId) { setCaseId(r.caseId); rememberCase(r.caseId); }
               setSubject(r.subject);

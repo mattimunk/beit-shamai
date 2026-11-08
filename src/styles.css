@@ -384,3 +384,32 @@ label.button.ghost { border: 1px solid var(--c-line); background: var(--c-surfac
 .visit-wrap > .visit-share { max-width: 760px; margin: 12px auto 0; }
 .property-bar select { width: auto; flex: 0 1 380px; }
 .property-bar .ghost { flex: none; }
+
+/* Accounts, my properties, admin pipeline */
+.account { max-width: 460px; margin: 24px auto; padding: 0 12px; }
+.account form, .account .card { display: grid; gap: 10px; }
+.code-input { font-size: 24px; letter-spacing: 0.3em; text-align: center; }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.role-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.role-pick button { padding: 8px 14px; border-radius: 99px; border: 1px solid var(--c-line); background: var(--c-surface); }
+.role-pick button.active { background: var(--c-ink); color: #fff; border-color: var(--c-ink); }
+.consent { align-items: flex-start; }
+.user-chip { display: inline-flex; gap: 4px; align-items: center; }
+.props { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 12px; }
+.props-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.props-head h2 { margin: 0; }
+.prop-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.prop-card { all: unset; cursor: pointer; display: grid; gap: 6px; padding: 14px; background: var(--c-surface); border: 1px solid var(--c-line); border-radius: 12px; }
+.prop-card:hover { border-color: var(--c-accent); }
+.prop-top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.next-step { color: var(--c-accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { padding: 6px 12px; border-radius: 99px; border: 1px solid var(--c-line); background: var(--c-surface); font-size: 13px; }
+.chips button.active { background: var(--c-ink); color: #fff; border-color: var(--c-ink); }
+.badge.st-draft { background: #eee; color: #555; }
+.badge.st-submitted { background: #fde8e8; color: #a12; }
+.badge.st-data, .badge.st-documents, .badge.st-review { background: var(--c-warn-soft); color: var(--c-warn); }
+.badge.st-done { background: var(--c-accent-soft); color: var(--c-accent); }
+.pipeline select { padding: 4px; border-radius: 6px; }
+.strip-addr { margin-inline-start: 6px; }
+.notice { max-width: 760px; margin: 10px auto; padding: 10px 14px; background: var(--c-accent-soft); color: var(--c-accent); border-radius: 10px; cursor: pointer; }

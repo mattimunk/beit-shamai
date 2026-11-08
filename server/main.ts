@@ -10,6 +10,15 @@
  *   GET  /api/parcel-at?lat&lng    nearest parcels (suggested block/parcel for an address)
  *   POST /api/cases/:caseId/adverts   Madlan/Yad2 print-to-PDF (multipart: file) → cards read
  *   GET  /api/cases/:caseId/adverts   the case's adverts and whether each is used
+ *   POST /api/auth/code              { email, lang? } – send a sign-in code
+ *   POST /api/auth/verify            { email, code } – sign in (session cookie)
+ *   POST /api/auth/logout
+ *   GET  /api/me                     signed-in user (+ isAdmin) or 401
+ *   PUT  /api/me                     profile: name, phone, role, agency, license, marketingConsent
+ *   GET  /api/my/cases               the signed-in user's property files
+ *   POST /api/cases/:caseId/submit   owner sends the property for review (opens the data request)
+ *   GET  /api/admin/cases?status=    all property files (pipeline)                     [admin]
+ *   PUT  /api/admin/cases/:caseId    { status }                                         [admin]
  *   GET  /api/cases?ids=a,b          summaries of property files (the browser's own list)
  *   GET  /api/cases/:caseId          a property file (its id is its key)
  *   PUT  /api/cases/:caseId          { subject } – create or update a property file
@@ -43,11 +52,13 @@ import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
 import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts";
 import { parcelsNear } from "./connectors/parcelsOpen";
-import { caseSummaries, getCase, saveCase } from "./cases";
+import { allCases, caseSummaries, getCase, saveCase, setCaseStatus, userCases, CASE_STATUSES, type CaseStatus } from "./cases";
+import { adminEmails, endSession, isAdminUser, requestCode, sessionCookie, sessionUser, updateProfile, verifyCode, type ProfileInput } from "./auth";
+import { sendMail } from "./mailer";
 import { MAX_CAPTURE_BYTES, framePath, getLayout, listCaptures, saveLayout, storeCapture, type Layout } from "./capture";
 import { importDeals, parseCsv } from "./dealsImport";
 import { importTaxExport, relocateUnlocated } from "./taxImport";
-import { createRequest, getRequest, listRequests, reconcileAll, uploadToItem } from "./requests";
+import { createRequest, ensureRequestTables, getRequest, listRequests, reconcileAll, uploadToItem } from "./requests";
 
 /** An upload is either multipart (field "file") or the raw file as the body. */
 async function readUploadText(req: Request): Promise<string> {
@@ -94,7 +105,9 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
-  const isAdmin = (req: Request) => !!adminToken && req.headers.get("authorization") === `Bearer ${adminToken}`;
+  // Admin: the server's admin token (scripts, the data-requests inbox) or a signed-in admin.
+  const isAdmin = (req: Request) =>
+    (!!adminToken && req.headers.get("authorization") === `Bearer ${adminToken}`) || isAdminUser(sessionUser(db, req));
   const cityByName = (name: string) => cfg.cities.find((c) => c.name === name);
 
   const server = Bun.serve({
@@ -131,6 +144,69 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           return json(await valuate(body.subject, provider, date, facts));
         }
 
+        // ---- Accounts ------------------------------------------------------------------------
+        if (url.pathname === "/api/auth/code" && req.method === "POST") {
+          const b = (await req.json()) as { email?: string; lang?: "he" | "en" };
+          try { return json(await requestCode(db, b.email ?? "", b.lang === "en" ? "en" : "he")); }
+          catch (e) { return json({ error: (e as Error).message }, 400); }
+        }
+        if (url.pathname === "/api/auth/verify" && req.method === "POST") {
+          const b = (await req.json()) as { email?: string; code?: string };
+          try {
+            const r = verifyCode(db, b.email ?? "", b.code ?? "");
+            return new Response(JSON.stringify({ user: r.user, isNew: r.isNew, isAdmin: isAdminUser(r.user) }), {
+              headers: { "content-type": "application/json; charset=utf-8", "set-cookie": sessionCookie(r.token, req) },
+            });
+          } catch (e) { return json({ error: (e as Error).message }, 400); }
+        }
+        if (url.pathname === "/api/auth/logout" && req.method === "POST") {
+          endSession(db, req);
+          return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json", "set-cookie": sessionCookie("", req, true) } });
+        }
+        if (url.pathname === "/api/me") {
+          const u = sessionUser(db, req);
+          if (!u) return json({ error: "not signed in" }, 401);
+          if (req.method === "PUT") return json({ user: updateProfile(db, u.id, (await req.json()) as ProfileInput), isAdmin: isAdminUser(u) });
+          return json({ user: u, isAdmin: isAdminUser(u) });
+        }
+        if (url.pathname === "/api/my/cases" && req.method === "GET") {
+          const u = sessionUser(db, req);
+          if (!u) return json({ error: "not signed in" }, 401);
+          return json(userCases(db, u.id));
+        }
+        const submitRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/submit$/);
+        if (submitRoute && req.method === "POST") {
+          const u = sessionUser(db, req);
+          if (!u) return json({ error: "not signed in" }, 401);
+          const c = getCase(db, submitRoute[1]!);
+          if (!c) return json({ error: "not found" }, 404);
+          if (c.ownerId && c.ownerId !== u.id && !isAdminUser(u)) return json({ error: "not your property" }, 403);
+          if (!c.ownerId) saveCase(db, c.id, c.subject, u.id);
+          if (c.status === "draft") setCaseStatus(db, c.id, "submitted");
+          // Open the Tax Authority data request for it (once).
+          ensureRequestTables(db);
+          const existing = db.query(`SELECT id FROM requests WHERE case_id = ? LIMIT 1`).get(c.id) as { id: string } | null;
+          const request = existing ? getRequest(db, existing.id, true) : c.subject.address.city ? createRequest(db, c.subject, undefined, c.id) : null;
+          const addr = [c.subject.address.street, c.subject.address.number].filter(Boolean).join(" ") + (c.subject.address.city ? `, ${c.subject.address.city}` : "");
+          for (const to of adminEmails()) {
+            sendMail({ to, subject: `נכס חדש הוגש: ${addr}`, text: `נכס חדש הוגש לבדיקה.\n\nכתובת: ${addr}\nמגיש: ${u.name ?? ""} <${u.email}> (${u.role ?? "—"})\n\nהיכנסו לאזור הניהול כדי לטפל.` }).catch(() => {});
+          }
+          return json({ case: getCase(db, c.id), request });
+        }
+        if (url.pathname === "/api/admin/cases" && req.method === "GET") {
+          if (!isAdmin(req)) return json({ error: "unauthorised" }, 401);
+          const st = url.searchParams.get("status") as CaseStatus | null;
+          return json(allCases(db, st && CASE_STATUSES.includes(st) ? st : undefined));
+        }
+        const adminCaseRoute = url.pathname.match(/^\/api\/admin\/cases\/([A-Za-z0-9-]{16,64})$/);
+        if (adminCaseRoute && req.method === "PUT") {
+          if (!isAdmin(req)) return json({ error: "unauthorised" }, 401);
+          const b = (await req.json()) as { status?: CaseStatus };
+          if (!b.status || !CASE_STATUSES.includes(b.status)) return json({ error: "bad status" }, 400);
+          setCaseStatus(db, adminCaseRoute[1]!, b.status);
+          return json(getCase(db, adminCaseRoute[1]!));
+        }
+
         if (url.pathname === "/api/cases" && req.method === "GET") {
           return json(caseSummaries(db, (url.searchParams.get("ids") ?? "").split(",").filter(Boolean)));
         }
@@ -143,7 +219,7 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           if (req.method === "PUT") {
             const b = (await req.json()) as { subject: Subject };
             if (!b?.subject?.address) return json({ error: "subject required" }, 400);
-            return json(saveCase(db, caseRoute[1]!, b.subject));
+            return json(saveCase(db, caseRoute[1]!, b.subject, sessionUser(db, req)?.id));
           }
         }
 
