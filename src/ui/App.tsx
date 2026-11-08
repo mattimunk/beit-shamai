@@ -122,8 +122,8 @@ export function App() {
     try { sessionStorage.setItem("bs-case-open", "1"); } catch { /* memory only */ }
     setSavedAddress(c ? addressLine(c.subject) : null);
     setDocs([]);
-    setRequest(null);
-    saveReqId(null);
+    setRequest(c?.request ?? null);
+    saveReqId(c?.request?.id ?? null);
     rememberCase(id);
     setTab("valuation");
   };

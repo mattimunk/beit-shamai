@@ -52,7 +52,7 @@ import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
 import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts";
 import { parcelsNear } from "./connectors/parcelsOpen";
-import { allCases, caseSummaries, getCase, saveCase, setCaseStatus, userCases, CASE_STATUSES, type CaseStatus } from "./cases";
+import { adoptOrphans, allCases, caseSummaries, getCase, saveCase, setCaseStatus, userCases, CASE_STATUSES, type CaseStatus } from "./cases";
 import { adminEmails, endSession, isAdminUser, requestCode, sessionCookie, sessionUser, updateProfile, verifyCode, type ProfileInput } from "./auth";
 import { sendMail } from "./mailer";
 import { MAX_CAPTURE_BYTES, framePath, getLayout, listCaptures, saveLayout, storeCapture, type Layout } from "./capture";
@@ -172,6 +172,7 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         if (url.pathname === "/api/my/cases" && req.method === "GET") {
           const u = sessionUser(db, req);
           if (!u) return json({ error: "not signed in" }, 401);
+          if (isAdminUser(u)) { ensureRequestTables(db); adoptOrphans(db, u.id); } // files from before accounts
           return json(userCases(db, u.id));
         }
         const submitRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/submit$/);
@@ -195,6 +196,8 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         }
         if (url.pathname === "/api/admin/cases" && req.method === "GET") {
           if (!isAdmin(req)) return json({ error: "unauthorised" }, 401);
+          const adminUser = sessionUser(db, req);
+          if (adminUser && isAdminUser(adminUser)) { ensureRequestTables(db); adoptOrphans(db, adminUser.id); }
           const st = url.searchParams.get("status") as CaseStatus | null;
           return json(allCases(db, st && CASE_STATUSES.includes(st) ? st : undefined));
         }
@@ -214,7 +217,11 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         if (caseRoute) {
           if (req.method === "GET") {
             const c = getCase(db, caseRoute[1]!);
-            return c ? json(c) : json({ error: "not found" }, 404);
+            if (!c) return json({ error: "not found" }, 404);
+            // Its latest order, so the report shows preliminary / final.
+            ensureRequestTables(db);
+            const r = db.query(`SELECT id FROM requests WHERE case_id = ? ORDER BY created_at DESC LIMIT 1`).get(c.id) as { id: string } | null;
+            return json({ ...c, request: r ? getRequest(db, r.id, true) : null });
           }
           if (req.method === "PUT") {
             const b = (await req.json()) as { subject: Subject };

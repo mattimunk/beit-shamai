@@ -117,3 +117,22 @@ describe("phone numbers", () => {
     expect(updateProfile(db, "u1", { phone: "" }).phone).toBeUndefined();
   });
 });
+
+describe("files from before accounts", () => {
+  test("orders without a file get one per address; ownerless files go to the admin", async () => {
+    const { adoptOrphans, userCases, saveCase } = await import("../server/cases");
+    const { createRequest } = await import("../server/requests");
+    const db = openDb(":memory:");
+    const s = (street: string) => ({ ...DEMO_SUBJECT, address: { city: "תל אביב-יפו", street, number: "10" } }) as any;
+    createRequest(db, s("בן יהודה"), "2026-11-04");       // old order, no file
+    createRequest(db, s("בן יהודה"), "2026-11-05");       // same address ordered again
+    saveCase(db, "case-bbbbbbbbbbbbbbbb", s("דיזנגוף"));  // file without owner
+    const r = adoptOrphans(db, "admin-1");
+    expect(r.filesCreated).toBe(1);
+    const mine = userCases(db, "admin-1");
+    expect(mine.map((c) => c.address).sort()).toEqual(["בן יהודה 10, תל אביב-יפו", "דיזנגוף 10, תל אביב-יפו"]);
+    expect(mine.find((c) => c.address.startsWith("בן יהודה"))!.request).toBeDefined();
+    // Running again changes nothing.
+    expect(adoptOrphans(db, "admin-1")).toEqual({ filesCreated: 0, filesAssigned: 0 });
+  });
+});

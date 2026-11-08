@@ -114,3 +114,37 @@ export function allCases(db: Database, status?: CaseStatus): CaseSummary[] {
     : db.query(`SELECT * FROM cases ORDER BY CASE WHEN status = 'draft' THEN 1 ELSE 0 END, COALESCE(submitted_at, updated_at) DESC LIMIT 1000`).all();
   return summarise(db, rows as any[]);
 }
+
+/**
+ * Before accounts existed, orders and property files had no owner (and the earliest orders had
+ * no file at all). They were all made by the operator, so they are adopted by the admin who
+ * opens "My properties": every order without a file gets one (one per address), and every
+ * file without an owner is assigned. New files always have an owner, so this only touches the
+ * old ones.
+ */
+export function adoptOrphans(db: Database, adminUserId: string): { filesCreated: number; filesAssigned: number } {
+  ensureCaseTables(db);
+  let filesCreated = 0;
+  let orphans: any[] = [];
+  try {
+    orphans = db.query(`SELECT r.id, r.created_at, r.status, r.subject, r.case_id FROM requests r
+      LEFT JOIN cases c ON c.id = r.case_id WHERE c.id IS NULL ORDER BY r.created_at`).all() as any[];
+  } catch { /* no requests table yet */ }
+  const byAddress = new Map<string, string>();
+  for (const r of orphans) {
+    const subject = JSON.parse(r.subject) as Subject;
+    const key = addressOf(subject).replace(/\s+/g, " ").trim();
+    let caseId = byAddress.get(key);
+    if (!caseId) {
+      caseId = r.case_id && CASE_ID.test(r.case_id) ? r.case_id : crypto.randomUUID();
+      const status: CaseStatus = r.status === "final" ? "review" : "submitted";
+      db.query(`INSERT OR IGNORE INTO cases (id, subject, created_at, updated_at, owner_id, status, submitted_at, status_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(caseId, r.subject, r.created_at, r.created_at, adminUserId, status, r.created_at, r.created_at);
+      byAddress.set(key, caseId);
+      filesCreated++;
+    }
+    db.query(`UPDATE requests SET case_id = ? WHERE id = ?`).run(caseId, r.id);
+  }
+  const assigned = db.query(`UPDATE cases SET owner_id = ? WHERE owner_id IS NULL`).run(adminUserId).changes;
+  return { filesCreated, filesAssigned: assigned };
+}

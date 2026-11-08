@@ -167,7 +167,7 @@ export function uploadShot(caseId: string, shotId: string, file: File, onProgres
 
 export interface CaseSummaryDto { id: string; address: string; updatedAt: string; createdAt: string; shots: number }
 
-export async function getCaseFile(id: string): Promise<{ id: string; subject: Subject } | null> {
+export async function getCaseFile(id: string): Promise<{ id: string; subject: Subject; status?: string; request?: RequestDto | null } | null> {
   const r = await fetch(`/api/cases/${encodeURIComponent(id)}`);
   return r.ok ? r.json() : null;
 }
