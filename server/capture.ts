@@ -17,7 +17,7 @@ export const MAX_CAPTURE_BYTES = 600 * 1024 * 1024;
 
 export type ShotKind =
   | "facade" | "entrance" | "stairs" | "salon" | "kitchen" | "bedroom" | "bathroom" | "toilet"
-  | "balcony" | "garden" | "storage" | "parking" | "view";
+  | "extra" | "balcony" | "garden" | "storage" | "parking" | "view";
 
 export interface Layout {
   bedrooms: number;
@@ -27,6 +27,8 @@ export interface Layout {
   garden: boolean;
   storage: boolean;
   parking: boolean;
+  /** Other rooms the owner named (study, utility room…), filmed after the bedrooms and bathrooms. */
+  extra?: string[];
 }
 
 export interface Shot { id: string; kind: ShotKind; n?: number }
@@ -44,6 +46,7 @@ export function buildShotList(l: Layout): Shot[] {
     ...many("bedroom", l.bedrooms),
     ...many("bathroom", l.bathrooms),
     ...many("toilet", l.toilets),
+    ...(l.extra ?? []).slice(0, 12).map((_, i) => ({ id: `extra-${i + 1}`, kind: "extra" as const, n: i + 1 })),
     ...many("balcony", l.balconies),
     ...(l.garden ? [{ id: "garden", kind: "garden" as const }] : []),
     ...(l.storage ? [{ id: "storage", kind: "storage" as const }] : []),
@@ -162,8 +165,19 @@ export function listCaptures(db: Database, caseId: string): CaptureRecord[] {
   }));
 }
 
-export function saveLayout(db: Database, caseId: string, layout: Layout) {
+/** Keeps only the known fields, in range. */
+export function cleanLayout(l: Partial<Layout>): Layout {
+  const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.floor(Number(v) || 0)));
+  return {
+    bedrooms: n(l.bedrooms, 12), bathrooms: n(l.bathrooms, 12), toilets: n(l.toilets, 12), balconies: n(l.balconies, 12),
+    garden: !!l.garden, storage: !!l.storage, parking: !!l.parking,
+    extra: Array.isArray(l.extra) ? l.extra.filter((x) => typeof x === "string").map((x) => x.slice(0, 40)).slice(0, 12) : [],
+  };
+}
+
+export function saveLayout(db: Database, caseId: string, raw: Layout) {
   ensureCaptureTables(db);
+  const layout = cleanLayout(raw);
   db.query(`INSERT OR REPLACE INTO case_layouts (case_id, layout, at) VALUES (?, ?, ?)`).run(caseId, JSON.stringify(layout), new Date().toISOString());
 }
 

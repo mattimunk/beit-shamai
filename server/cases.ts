@@ -6,6 +6,7 @@
  */
 import type { Database } from "bun:sqlite";
 import type { Subject } from "../src/engine/types";
+import { applicationNumber, overallProgress, upgradeDossier, type Dossier } from "../src/dossier/schema";
 
 export const CASE_ID = /^[A-Za-z0-9-]{16,64}$/;
 
@@ -15,29 +16,67 @@ export const CASE_STATUSES: CaseStatus[] = ["draft", "submitted", "data", "docum
 
 export interface CaseSummary {
   id: string; address: string; updatedAt: string; createdAt: string; shots: number;
-  status: CaseStatus; submittedAt?: string; statusAt?: string;
+  status: CaseStatus; submittedAt?: string; statusAt?: string; appNo?: string; progress?: number;
   owner?: { id: string; email: string; name?: string; role?: string };
   request?: { id: string; status: string; done: number; total: number };
 }
-export interface CaseRecord { id: string; subject: Subject; createdAt: string; updatedAt: string; status: CaseStatus; ownerId?: string; submittedAt?: string }
+export interface CaseRecord { id: string; subject: Subject; dossier?: Dossier; appNo?: string; createdAt: string; updatedAt: string; status: CaseStatus; ownerId?: string; submittedAt?: string }
+
+/** Next application number for this year (BS-26-00001, …). */
+function nextAppNo(db: Database): string {
+  const y = new Date().getFullYear();
+  db.query(`INSERT INTO app_seq (year, n) VALUES (?, 1) ON CONFLICT(year) DO UPDATE SET n = n + 1`).run(y);
+  return applicationNumber((db.query(`SELECT n FROM app_seq WHERE year = ?`).get(y) as { n: number }).n, y);
+}
 
 export function ensureCaseTables(db: Database) {
   db.exec(`CREATE TABLE IF NOT EXISTS cases (id TEXT PRIMARY KEY, subject TEXT, created_at TEXT, updated_at TEXT)`);
-  for (const col of ["owner_id TEXT", "status TEXT DEFAULT 'draft'", "submitted_at TEXT", "status_at TEXT"]) {
+  for (const col of ["owner_id TEXT", "status TEXT DEFAULT 'draft'", "submitted_at TEXT", "status_at TEXT", "dossier TEXT", "app_no TEXT"]) {
     try { db.exec(`ALTER TABLE cases ADD COLUMN ${col}`); } catch { /* already there */ }
   }
+  db.exec(`CREATE TABLE IF NOT EXISTS app_seq (year INTEGER PRIMARY KEY, n INTEGER)`);
+  db.exec(`CREATE TABLE IF NOT EXISTS capture_links (token TEXT PRIMARY KEY, case_id TEXT, created_at INTEGER, expires_at INTEGER, revoked INTEGER DEFAULT 0)`);
 }
 
 /** Create or update; a signed-in user saving a file that has no owner yet becomes its owner. */
-export function saveCase(db: Database, id: string, subject: Subject, userId?: string): CaseRecord {
+export function saveCase(db: Database, id: string, subject: Subject, userId?: string, dossier?: Dossier): CaseRecord {
   ensureCaseTables(db);
   const now = new Date().toISOString();
+  const exists = db.query(`SELECT app_no FROM cases WHERE id = ?`).get(id) as { app_no: string | null } | null;
+  const appNo = exists?.app_no ?? nextAppNo(db);
   db.query(
-    `INSERT INTO cases (id, subject, created_at, updated_at, owner_id, status) VALUES (?, ?, ?, ?, ?, 'draft')
+    `INSERT INTO cases (id, subject, created_at, updated_at, owner_id, status, dossier, app_no) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)
      ON CONFLICT(id) DO UPDATE SET subject = excluded.subject, updated_at = excluded.updated_at,
-       owner_id = COALESCE(cases.owner_id, excluded.owner_id)`,
-  ).run(id, JSON.stringify(subject), now, now, userId ?? null);
+       owner_id = COALESCE(cases.owner_id, excluded.owner_id), dossier = COALESCE(excluded.dossier, cases.dossier),
+       app_no = COALESCE(cases.app_no, excluded.app_no)`,
+  ).run(id, JSON.stringify(subject), now, now, userId ?? null, dossier ? JSON.stringify(dossier) : null, appNo);
   return getCase(db, id)!;
+}
+
+// ---- Filming links (QR / WhatsApp): temporary, revocable, one property, filming only ----------
+
+export const CAPTURE_LINK_HOURS = 48;
+
+/** A new filming link for a property; any earlier link for it stops working. */
+export function newCaptureLink(db: Database, caseId: string, now = Date.now()): { token: string; expiresAt: number } {
+  ensureCaseTables(db);
+  db.query(`UPDATE capture_links SET revoked = 1 WHERE case_id = ?`).run(caseId);
+  const token = Buffer.from(crypto.getRandomValues(new Uint8Array(18))).toString("base64url");
+  const expiresAt = now + CAPTURE_LINK_HOURS * 3600_000;
+  db.query(`INSERT INTO capture_links (token, case_id, created_at, expires_at, revoked) VALUES (?, ?, ?, ?, 0)`).run(token, caseId, now, expiresAt);
+  return { token, expiresAt };
+}
+
+export function captureLinkCase(db: Database, token: string, now = Date.now()): string | null {
+  ensureCaseTables(db);
+  if (!/^[A-Za-z0-9_-]{16,40}$/.test(token)) return null;
+  const r = db.query(`SELECT case_id, expires_at, revoked FROM capture_links WHERE token = ?`).get(token) as { case_id: string; expires_at: number; revoked: number } | null;
+  return r && !r.revoked && r.expires_at > now ? r.case_id : null;
+}
+
+export function revokeCaptureLinks(db: Database, caseId: string) {
+  ensureCaseTables(db);
+  db.query(`UPDATE capture_links SET revoked = 1 WHERE case_id = ?`).run(caseId);
 }
 
 export function setCaseStatus(db: Database, id: string, status: CaseStatus) {
@@ -52,7 +91,10 @@ export function getCase(db: Database, id: string): CaseRecord | null {
   ensureCaseTables(db);
   const r = db.query(`SELECT * FROM cases WHERE id = ?`).get(id) as any;
   return r
-    ? { id: r.id, subject: JSON.parse(r.subject), createdAt: r.created_at, updatedAt: r.updated_at, status: r.status ?? "draft", ownerId: r.owner_id ?? undefined, submittedAt: r.submitted_at ?? undefined }
+    ? {
+        id: r.id, subject: JSON.parse(r.subject), dossier: r.dossier ? upgradeDossier(JSON.parse(r.dossier)) : undefined, appNo: r.app_no ?? undefined,
+        createdAt: r.created_at, updatedAt: r.updated_at, status: r.status ?? "draft", ownerId: r.owner_id ?? undefined, submittedAt: r.submitted_at ?? undefined,
+      }
     : null;
 }
 
@@ -85,6 +127,8 @@ function summarise(db: Database, rows: any[]): CaseSummary[] {
     const u = r.owner_id ? users.get(r.owner_id) : undefined;
     return {
       id: r.id, address: addressOf(JSON.parse(r.subject)), createdAt: r.created_at, updatedAt: r.updated_at, shots: shots.get(r.id) ?? 0,
+      appNo: r.app_no ?? undefined,
+      progress: r.dossier ? overallProgress(upgradeDossier(JSON.parse(r.dossier)), { done: 0, total: 0 }) : undefined,
       status: (r.status ?? "draft") as CaseStatus, submittedAt: r.submitted_at ?? undefined, statusAt: r.status_at ?? undefined,
       owner: u ? { id: u.id, email: u.email, name: u.name ?? undefined, role: u.role ?? undefined } : undefined,
       request: reqs.get(r.id),

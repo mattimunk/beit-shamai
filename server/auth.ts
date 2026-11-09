@@ -10,8 +10,8 @@
 import type { Database } from "bun:sqlite";
 import { mailConfigured, sendMail, type Mailer } from "./mailer";
 
-export type UserRole = "buyer" | "seller" | "agent" | "appraiser" | "other";
-export const USER_ROLES: UserRole[] = ["buyer", "seller", "agent", "appraiser", "other"];
+export type UserRole = "buyer" | "seller" | "agent" | "appraiser" | "attorney" | "mortgage_broker" | "other";
+export const USER_ROLES: UserRole[] = ["buyer", "seller", "agent", "appraiser", "attorney", "mortgage_broker", "other"];
 
 export interface User {
   id: string;

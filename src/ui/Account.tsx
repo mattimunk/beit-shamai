@@ -59,7 +59,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (me: MeDto, isNew: boolean)
   );
 }
 
-const ROLES: UserRole[] = ["buyer", "seller", "agent", "appraiser", "other"];
+const ROLES: UserRole[] = ["seller", "buyer", "agent", "appraiser", "attorney", "mortgage_broker", "other"];
 
 /** Profile: shown on first sign-in, and from the user menu. */
 export function Profile({ me, onSaved, onCancel }: { me: MeDto; onSaved: (me: MeDto) => void; onCancel?: () => void }) {

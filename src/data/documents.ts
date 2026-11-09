@@ -13,6 +13,7 @@ import type { RightsType, Subject } from "../engine/types";
 
 export type DocKind =
   | "tabu"
+  | "rights_confirmation"
   | "purchase_contract"
   | "rental_contract"
   | "floor_plan"
@@ -76,6 +77,7 @@ export const DOC_FIELDS: Record<DocKind, { key: string; type: FieldType }[]> = {
   ],
   photos: [{ key: "notes", type: "text" }],
   advert_print: [],
+  rights_confirmation: [{ key: "date", type: "date" }, { key: "rights", type: "rights" }],
   other: [{ key: "notes", type: "text" }],
 };
 

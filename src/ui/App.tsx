@@ -3,26 +3,14 @@ import { valuate, type ValuationResult } from "../engine/valuation";
 import type { Subject } from "../engine/types";
 import { createDataRequest, detectServer, getDataRequest, requestProgress, valuateRemote, type RequestDto } from "../data/apiClient";
 import { RequestsInbox } from "./RequestsInbox";
-import { CaptureTour, shotOrder } from "./CaptureTour";
-import { frameUrl, getCapture, getCaseFile, rememberCase, saveCaseFile, type CaptureDto } from "../data/apiClient";
+import { shotOrder } from "./CaptureTour";
+import { captureBase, frameUrl, getCapture, getCaseFile, rememberCase, saveCaseFile, type CaptureDto } from "../data/apiClient";
 import { SignIn, Profile } from "./Account";
 import { AdminPipeline, MyProperties, PropertyStrip } from "./Properties";
 import { getMe, signOut, submitCase, type CaseStatus, type MeDto } from "../data/apiClient";
-import { VisitShare } from "./VisitShare";
+import { Intake } from "./intake/Intake";
 
-/** A new property file starts with neutral details – nothing from the demo flat that could
- * end up in a real report (no extras, no unpermitted balcony, no block/parcel). */
-function newSubject(): Subject {
-  return {
-    ...DEMO_SUBJECT,
-    address: { city: "", street: "", number: "" },
-    location: { lat: 32.0853, lng: 34.7818 },
-    parcel: undefined,
-    addOns: [],
-    condition: "original",
-    directions: [],
-  };
-}
+import { newSubject } from "./newSubject";
 import { DemoProvider, DEMO_VALUATION_DATE } from "../data/demo/demoProvider";
 import { DEMO_SUBJECT } from "../data/demo/demoSubject";
 import { STRINGS, type Lang } from "../i18n/strings";
@@ -34,7 +22,7 @@ import { ShumaReport, type ReportMeta, type ReportPhoto, type ReportStage } from
 import { DocumentsPanel } from "./DocumentsPanel";
 import { applyRegistry, documentFacts, type DocumentRecord } from "../data/documents";
 
-type Tab = "mine" | "valuation" | "report" | "visit" | "admin" | "requests";
+type Tab = "mine" | "intake" | "valuation" | "report" | "admin" | "requests";
 
 /** The open data request for this browser tab's report, kept across reloads where storage works. */
 const REQ_KEY = "bs-request";
@@ -85,11 +73,21 @@ export function App() {
   const [caseStatus, setCaseStatus] = useState<CaseStatus>("draft");
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // The intake starts at its welcome screen for a new property; signed-out visitors get it too.
+  const [fresh, setFresh] = useState(() => { try { return !sessionStorage.getItem("bs-case-open"); } catch { return true; } });
+  const [showSignIn, setShowSignIn] = useState(false);
   useEffect(() => {
     if (!live) return;
-    getMe().then((m) => { setMe(m); if (m) setTab((t0) => (t0 === "valuation" && !sessionStorage.getItem("bs-case-open") ? "mine" : t0)); }).catch(() => setMe(null));
+    getMe().then((m) => {
+      setMe(m);
+      let open = false;
+      try { open = !!sessionStorage.getItem("bs-case-open"); } catch { /* no storage */ }
+      setTab(m ? (open ? "intake" : "mine") : "intake");
+    }).catch(() => setMe(null));
   }, [live]);
   // What a signed-in user sees of the report follows their role; admins can switch.
+  // Estimates and reports are for professionals; everyone else works in the intake.
+  const isPro = !!me && (me.isAdmin || me.user.role === "agent" || me.user.role === "appraiser");
   const userTier: Role | null = me && !me.isAdmin ? (me.user.role === "agent" ? "realtor" : me.user.role === "appraiser" ? "appraiser" : "buyer") : null;
   useEffect(() => { if (userTier && role !== userTier) setRoleState(userTier); }, [userTier]);
   const [savedAddress, setSavedAddress] = useState<string | null>(null);
@@ -97,13 +95,14 @@ export function App() {
   // Live mode: load this tab's property file from the server, if it has one.
   useEffect(() => {
     if (!live) return;
+    if (tab === "intake") return;
     getCaseFile(caseId).then((c) => { if (c) { setSubject(c.subject); setSavedAddress(addressLine(c.subject)); setCaseStatus(((c as any).status ?? "draft") as CaseStatus); } }).catch(() => {});
-  }, [live, caseId]);
+  }, [live, caseId, tab === "intake"]);
 
   // Save the property's details to its file as they are edited (once it has an address).
   useEffect(() => {
     // Not before it has an address, and never the demo flat.
-    if (!live || !subject.address.street.trim() || subject.address.city === DEMO_SUBJECT.address.city) return;
+    if (!live || tab === "intake" || !subject.address.street.trim() || subject.address.city === DEMO_SUBJECT.address.city) return;
     const h = setTimeout(() => {
       saveCaseFile(caseId, subject).then(() => {
         rememberCase(caseId);
@@ -125,7 +124,8 @@ export function App() {
     setRequest(c?.request ?? null);
     saveReqId(c?.request?.id ?? null);
     rememberCase(id);
-    setTab("valuation");
+    setFresh(false);
+    setTab("intake");
   };
   const submit = async () => {
     setSubmitting(true);
@@ -150,15 +150,12 @@ export function App() {
     setCaptures([]);
     setRequest(null);
     saveReqId(null);
-    setTab("valuation");
+    setFresh(true);
+    setTab("intake");
   };
-  // The filming link must open an existing file, so opening the visit tab saves it.
-  useEffect(() => {
-    if (live && tab === "visit") saveCaseFile(caseId, subject).then(() => { rememberCase(caseId); setFilesKey((k) => k + 1); }).catch(() => {});
-  }, [live, tab, caseId]);
   useEffect(() => {
     if (!live) return;
-    getCapture(caseId).then((r) => setCaptures(r.captures)).catch(() => setCaptures([]));
+    getCapture(captureBase({ caseId })).then((r) => setCaptures(r.captures)).catch(() => setCaptures([]));
   }, [live, caseId]);
   const t = STRINGS[lang];
   const [meta, setMeta] = useState<ReportMeta>(() => ({
@@ -207,7 +204,7 @@ export function App() {
   };
   // Report annex: frames from the visit films (in shot order) and attached photos.
   const photos: ReportPhoto[] = [
-    ...[...captures].sort((a, b) => shotOrder(a.shotId) - shotOrder(b.shotId)).flatMap((c) => c.frames.map((f) => ({ src: frameUrl(caseId, f), shotId: c.shotId, date: c.at.slice(0, 10) }))),
+    ...[...captures].sort((a, b) => shotOrder(a.shotId) - shotOrder(b.shotId)).flatMap((c) => c.frames.map((f) => ({ src: frameUrl(captureBase({ caseId }), f), shotId: c.shotId, date: c.at.slice(0, 10) }))),
     ...docs.filter((d) => d.kind === "photos" && d.url && /^image\//.test(d.mime)).map((d) => ({ src: d.url!, label: d.fileName })),
   ];
   const stage: ReportStage | undefined = live
@@ -262,7 +259,7 @@ export function App() {
           <nav className="tabs" role="tablist">
             {(live
               ? me
-                ? ["mine", "valuation", "report", "visit", ...(me.isAdmin ? ["admin", "requests"] : [])]
+                ? ["mine", "intake", ...(isPro ? ["valuation", "report"] : []), ...(me.isAdmin ? ["admin", "requests"] : [])]
                 : []
               : ["valuation", "report"]
             ).map((k) => k as Tab).map((k) => (
@@ -277,7 +274,7 @@ export function App() {
                 <button className="ghost" onClick={() => setEditProfile(true)} title={me.user.email}>
                   {me.user.name || me.user.email}{me.user.role ? ` · ${t.account.roles[me.user.role]}` : ""}{me.isAdmin ? " · admin" : ""}
                 </button>
-                <button className="ghost" onClick={async () => { await signOut(); setMe(null); setTab("valuation"); }}>{t.account.signOut}</button>
+                <button className="ghost" onClick={async () => { await signOut(); newCase(); try { sessionStorage.removeItem("bs-case-open"); } catch { /* memory only */ } setMe(null); }}>{t.account.signOut}</button>
               </div>
             )}
             {(!live || me?.isAdmin) && <div className="segmented" role="radiogroup" aria-label="role">
@@ -299,26 +296,28 @@ export function App() {
         </header>
 
         {!live && <div className="demo-banner no-print">{t.demoBanner}</div>}
-        {live && me && ["valuation", "report", "visit"].includes(tab) && (
+        {live && me && ["valuation", "report"].includes(tab) && (
           <PropertyStrip address={addressLine(effective)} status={caseStatus} onBack={() => setTab("mine")} onSubmit={submit} submitting={submitting} />
         )}
         {notice && <div className="notice no-print" onClick={() => setNotice(null)}>{notice}</div>}
 
         {live && me === undefined ? (
           <main className="account"><div className="card muted">{t.loading}</div></main>
+        ) : live && me === null && showSignIn ? (
+          <SignIn onSignedIn={(m, isNew) => { setMe(m); setShowSignIn(false); setEditProfile(isNew || !m.user.role); setTab("mine"); }} />
         ) : live && me === null ? (
-          <SignIn onSignedIn={(m, isNew) => { setMe(m); setEditProfile(isNew || !m.user.role); setTab("mine"); }} />
+          <Intake key={`intake-${caseId}`} me={null} caseId={caseId} fresh onSignedIn={(m) => { setMe(m); setTab("intake"); try { sessionStorage.setItem("bs-case-open", "1"); } catch { /* memory only */ } }}
+            onSaved={() => setFilesKey((k) => k + 1)} onStatus={setCaseStatus} onSignInInstead={() => setShowSignIn(true)} />
         ) : live && me && (editProfile || !me.user.role) ? (
           <Profile me={me} onSaved={(m) => { setMe(m); setEditProfile(false); }} onCancel={me.user.role ? () => setEditProfile(false) : undefined} />
         ) : tab === "mine" && live ? (
           <MyProperties onOpen={openCase} onNew={newCase} refreshKey={filesKey} />
         ) : tab === "admin" && live && me?.isAdmin ? (
           <AdminPipeline onOpen={openCase} />
-        ) : tab === "visit" && live ? (
-          <div className="visit-wrap">
-            <VisitShare caseId={caseId} address={addressLine(effective)} />
-            <CaptureTour key={caseId} caseId={caseId} subject={effective} onChange={setCaptures} />
-          </div>
+        ) : tab === "intake" && live && me ? (
+          <Intake key={`intake-${caseId}`} me={me} caseId={caseId} fresh={fresh} onSignedIn={setMe}
+            onSaved={() => { rememberCase(caseId); setFresh(false); try { sessionStorage.setItem("bs-case-open", "1"); } catch { /* memory only */ } setFilesKey((k) => k + 1); }}
+            onStatus={(st) => { setCaseStatus(st); setNotice(t.pipeline.submitted); setFilesKey((k) => k + 1); }} />
         ) : tab === "requests" && live ? (
           <RequestsInbox
             session={!!me?.isAdmin}

@@ -129,26 +129,27 @@ export async function parcelAt(lat: number, lng: number): Promise<{ block: numbe
 
 // ---- Visit capture -------------------------------------------------------------------------
 
-export interface VisitLayout { bedrooms: number; bathrooms: number; toilets: number; balconies: number; garden: boolean; storage: boolean; parking: boolean }
+export interface VisitLayout { bedrooms: number; bathrooms: number; toilets: number; balconies: number; garden: boolean; storage: boolean; parking: boolean; extra?: string[] }
 export interface CaptureDto { shotId: string; media: "video" | "photo"; frames: string[]; duration?: number; at: string }
 
-export async function getCapture(caseId: string): Promise<{ layout: VisitLayout | null; captures: CaptureDto[] }> {
-  const r = await fetch(`/api/cases/${encodeURIComponent(caseId)}/capture`);
+/** `base` is captureBase({ caseId }) or captureBase({ token }). */
+export async function getCapture(base: string): Promise<{ layout: VisitLayout | null; captures: CaptureDto[] }> {
+  const r = await fetch(`${base}/capture`);
   if (!r.ok) return { layout: null, captures: [] };
   return r.json();
 }
 
-export async function saveVisitLayout(caseId: string, layout: VisitLayout) {
-  await fetch(`/api/cases/${encodeURIComponent(caseId)}/capture`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ layout }) });
+export async function saveVisitLayout(base: string, layout: VisitLayout) {
+  await fetch(`${base}/capture`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ layout }) });
 }
 
-export const frameUrl = (caseId: string, name: string) => `/api/cases/${encodeURIComponent(caseId)}/frames/${encodeURIComponent(name)}`;
+export const frameUrl = (base: string, name: string) => `${base}/frames/${encodeURIComponent(name)}`;
 
 /** Upload one shot with progress (fetch has no upload progress, so XMLHttpRequest). */
-export function uploadShot(caseId: string, shotId: string, file: File, onProgress: (share: number) => void): Promise<CaptureDto> {
+export function uploadShot(base: string, shotId: string, file: File, onProgress: (share: number) => void): Promise<CaptureDto> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `/api/cases/${encodeURIComponent(caseId)}/capture/${shotId}`);
+    xhr.open("POST", `${base}/capture/${shotId}`);
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
     xhr.onload = () => {
       let j: any = null;
@@ -167,7 +168,7 @@ export function uploadShot(caseId: string, shotId: string, file: File, onProgres
 
 export interface CaseSummaryDto { id: string; address: string; updatedAt: string; createdAt: string; shots: number }
 
-export async function getCaseFile(id: string): Promise<{ id: string; subject: Subject; status?: string; request?: RequestDto | null } | null> {
+export async function getCaseFile(id: string): Promise<{ id: string; subject: Subject; status?: string; request?: RequestDto | null; dossier?: unknown; appNo?: string } | null> {
   const r = await fetch(`/api/cases/${encodeURIComponent(id)}`);
   return r.ok ? r.json() : null;
 }
@@ -195,7 +196,7 @@ export const visitLink = (caseId: string) => `${location.origin}/?visit=${encode
 
 // ---- Accounts ---------------------------------------------------------------------------------
 
-export type UserRole = "buyer" | "seller" | "agent" | "appraiser" | "other";
+export type UserRole = "buyer" | "seller" | "agent" | "appraiser" | "attorney" | "mortgage_broker" | "other";
 export interface UserDto { id: string; email: string; name?: string; phone?: string; role?: UserRole; agency?: string; license?: string; marketingConsent: boolean }
 export interface MeDto { user: UserDto; isAdmin: boolean }
 export type CaseStatus = "draft" | "submitted" | "data" | "documents" | "review" | "done";
@@ -225,3 +226,25 @@ export const myCases = () => fetch("/api/my/cases").then((r) => jsonOrThrow<Pipe
 export const submitCase = (id: string) => post(`/api/cases/${encodeURIComponent(id)}/submit`).then((r) => jsonOrThrow<{ case: { status: CaseStatus }; request: RequestDto | null }>(r));
 export const adminCases = (status?: CaseStatus) => fetch(`/api/admin/cases${status ? `?status=${status}` : ""}`).then((r) => jsonOrThrow<PipelineCase[]>(r));
 export const setCaseStatusAdmin = (id: string, status: CaseStatus) => post(`/api/admin/cases/${encodeURIComponent(id)}`, { status }, "PUT").then((r) => jsonOrThrow(r));
+
+// ---- Dossier, case documents, filming links ---------------------------------------------------
+
+export interface CaseDocDto { id: string; kind: string; fileName: string; mime: string; size: number; addedAt: string }
+export const listCaseDocuments = (caseId: string) => fetch(`/api/cases/${encodeURIComponent(caseId)}/documents`).then((r) => (r.ok ? r.json() : [])) as Promise<CaseDocDto[]>;
+
+export async function saveDossier(caseId: string, subject: Subject, dossier: unknown): Promise<{ appNo?: string }> {
+  const r = await fetch(`/api/cases/${encodeURIComponent(caseId)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject, dossier }) });
+  if (!r.ok) throw new Error(`save ${r.status}`);
+  return r.json();
+}
+
+export const newFilmLink = (caseId: string) =>
+  post(`/api/cases/${encodeURIComponent(caseId)}/capture-link`).then((r) => jsonOrThrow<{ token: string; expiresAt: number; path: string }>(r));
+
+/** Capture calls go to /api/cases/<id> (signed-in owner) or /api/t/<token> (filming link). */
+export const captureBase = (k: { caseId?: string; token?: string }) => (k.token ? `/api/t/${encodeURIComponent(k.token)}` : `/api/cases/${encodeURIComponent(k.caseId!)}`);
+export const filmLinkInfo = (token: string) =>
+  fetch(`/api/t/${encodeURIComponent(token)}`).then((r) => jsonOrThrow<{ appNo?: string; address: string; layout: VisitLayout | null; skipped: string[] }>(r));
+
+export const setShotSkipped = (base: string, shotId: string, skipped: boolean) =>
+  post(`${base}/capture`, { skip: shotId, skipped }, "PUT").then((r) => jsonOrThrow<{ skipped: string[] }>(r));

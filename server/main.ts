@@ -22,6 +22,10 @@
  *   GET  /api/cases?ids=a,b          summaries of property files (the browser's own list)
  *   GET  /api/cases/:caseId          a property file (its id is its key)
  *   PUT  /api/cases/:caseId          { subject } – create or update a property file
+ *   POST /api/cases/:caseId/capture-link   new filming link (48 h; replaces earlier ones)
+ *   DELETE /api/cases/:caseId/capture-link revoke filming links
+ *   GET  /api/t/:token               what a filming link opens (address, rooms to film)
+ *   …    /api/t/:token/capture…      filming routes for that property only
  *   GET  /api/cases/:caseId/capture   visit layout + captured shots (frames for the report)
  *   PUT  /api/cases/:caseId/capture   { layout } – bedrooms, bathrooms, balconies…
  *   POST /api/cases/:caseId/capture/:shotId   one video or photo (multipart: file)
@@ -52,6 +56,8 @@ import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
 import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts";
 import { parcelsNear } from "./connectors/parcelsOpen";
+import { captureLinkCase, newCaptureLink, revokeCaptureLinks } from "./cases";
+import { tourLayout, upgradeDossier, type Dossier } from "../src/dossier/schema";
 import { adoptOrphans, allCases, caseSummaries, getCase, saveCase, setCaseStatus, userCases, CASE_STATUSES, type CaseStatus } from "./cases";
 import { adminEmails, endSession, isAdminUser, requestCode, sessionCookie, sessionUser, updateProfile, verifyCode, type ProfileInput } from "./auth";
 import { sendMail } from "./mailer";
@@ -114,7 +120,38 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
     port: opts.port ?? Number(process.env.PORT ?? 8787),
     maxRequestBodySize: MAX_CAPTURE_BYTES + 1024 * 1024, // visit videos
     async fetch(req) {
-      const url = new URL(req.url);
+      let url = new URL(req.url);
+      // Filming links: /api/t/<token>/capture… act on that one property's filming only.
+      let tokenCase: string | null = null;
+      const tok = url.pathname.match(/^\/api\/t\/([A-Za-z0-9_-]{16,40})(\/.*)?$/);
+      if (tok) {
+        tokenCase = captureLinkCase(db, tok[1]!);
+        if (!tokenCase) return json({ error: "link expired or replaced" }, 410);
+        const rest = tok[2] ?? "";
+        if (!rest) {
+          const c = getCase(db, tokenCase);
+          if (!c) return json({ error: "not found" }, 404);
+          const a = c.subject.address;
+          return json({
+            appNo: c.appNo,
+            address: [a.street, a.number].filter(Boolean).join(" ") + (a.city ? `, ${a.city}` : ""),
+            layout: c.dossier ? tourLayout(c.dossier) : null,
+            skipped: c.dossier?.tourSkipped ?? [],
+          });
+        }
+        if (!/^\/(capture(\/[a-z]+(-\d{1,2})?)?|frames\/[^/]+)$/.test(rest)) return json({ error: "not found" }, 404);
+        url = new URL(`/api/cases/${tokenCase}${rest}${url.search}`, url);
+      }
+      /** Who may open a property file: its owner, an admin, a filming link (filming only), or
+       * anyone while the file has no owner yet (a new, unsaved file or one from before accounts). */
+      const canAccess = (caseId: string, filming = false): boolean => {
+        if (filming && tokenCase === caseId) return true;
+        if (tokenCase) return false;
+        const c = getCase(db, caseId);
+        if (!c || !c.ownerId) return true;
+        const u = sessionUser(db, req);
+        return !!u && (u.id === c.ownerId || isAdminUser(u));
+      };
       try {
         if (url.pathname === "/" || url.pathname === "/index.html") {
           return existsSync(appFile)
@@ -214,6 +251,7 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           return json(caseSummaries(db, (url.searchParams.get("ids") ?? "").split(",").filter(Boolean)));
         }
         const caseRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})$/);
+        if (caseRoute && !canAccess(caseRoute[1]!)) return json({ error: "no access to this property" }, 403);
         if (caseRoute) {
           if (req.method === "GET") {
             const c = getCase(db, caseRoute[1]!);
@@ -224,18 +262,28 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
             return json({ ...c, request: r ? getRequest(db, r.id, true) : null });
           }
           if (req.method === "PUT") {
-            const b = (await req.json()) as { subject: Subject };
+            const b = (await req.json()) as { subject: Subject; dossier?: Dossier };
             if (!b?.subject?.address) return json({ error: "subject required" }, 400);
-            return json(saveCase(db, caseRoute[1]!, b.subject, sessionUser(db, req)?.id));
+            return json(saveCase(db, caseRoute[1]!, b.subject, sessionUser(db, req)?.id, b.dossier ? upgradeDossier(b.dossier) : undefined));
           }
         }
 
         const capRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/capture(?:\/([a-z]+(?:-\d{1,2})?))?$/);
+        if (capRoute && !canAccess(capRoute[1]!, true)) return json({ error: "no access to this property" }, 403);
         if (capRoute) {
           const caseId = capRoute[1]!, shotId = capRoute[2];
           if (!shotId && req.method === "GET") return json({ layout: getLayout(db, caseId), captures: listCaptures(db, caseId) });
           if (!shotId && req.method === "PUT") {
-            const b = (await req.json()) as { layout: Layout };
+            const b = (await req.json()) as { layout?: Layout; skip?: string; skipped?: boolean };
+            if (b?.skip && /^[a-z]+(-\d{1,2})?$/.test(b.skip)) {
+              // "Skip for now" on a tour step, kept in the dossier.
+              const c = getCase(db, caseId);
+              if (!c) return json({ error: "not found" }, 404);
+              const d = upgradeDossier(c.dossier);
+              d.tourSkipped = b.skipped ? [...new Set([...d.tourSkipped, b.skip])] : d.tourSkipped.filter((x) => x !== b.skip);
+              db.query(`UPDATE cases SET dossier = ? WHERE id = ?`).run(JSON.stringify(d), caseId);
+              return json({ skipped: d.tourSkipped });
+            }
             if (!b?.layout) return json({ error: "layout required" }, 400);
             saveLayout(db, caseId, b.layout);
             return json({ ok: true });
@@ -247,6 +295,7 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           }
         }
         const frameRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/frames\/([^/]+)$/);
+        if (frameRoute && !canAccess(frameRoute[1]!, true)) return json({ error: "no access to this property" }, 403);
         if (frameRoute && req.method === "GET") {
           const p = framePath(frameRoute[1]!, frameRoute[2]!);
           if (!p || !existsSync(p)) return json({ error: "not found" }, 404);
@@ -254,6 +303,7 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         }
 
         const advRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/adverts$/);
+        if (advRoute && !canAccess(advRoute[1]!)) return json({ error: "no access to this property" }, 403);
         if (advRoute) {
           const caseId = advRoute[1]!;
           if (req.method === "GET") return json(listCaseAdverts(db, caseId));
@@ -268,6 +318,20 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         }
 
         const docRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/documents$/);
+        if (docRoute && !canAccess(docRoute[1]!)) return json({ error: "no access to this property" }, 403);
+        // New filming link (QR / WhatsApp) for a property; earlier links stop working.
+        const linkRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/capture-link$/);
+        if (linkRoute && req.method === "POST") {
+          if (tokenCase || !canAccess(linkRoute[1]!)) return json({ error: "no access to this property" }, 403);
+          if (!getCase(db, linkRoute[1]!)) return json({ error: "save the property first" }, 400);
+          const l = newCaptureLink(db, linkRoute[1]!);
+          return json({ ...l, path: `/?film=${l.token}` });
+        }
+        if (linkRoute && req.method === "DELETE") {
+          if (tokenCase || !canAccess(linkRoute[1]!)) return json({ error: "no access to this property" }, 403);
+          revokeCaptureLinks(db, linkRoute[1]!);
+          return json({ ok: true });
+        }
         if (docRoute && req.method === "POST") {
           const [body, status] = await storeDocument(db, docRoute[1]!, req);
           return json(body, status);
