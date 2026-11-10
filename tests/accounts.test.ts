@@ -82,8 +82,8 @@ describe("accounts over HTTP", () => {
     expect(all[0]).toMatchObject({ id, status: "submitted", owner: { email: "buyer@example.com", name: "Avi", role: "buyer" } });
     expect(all[0].request.total).toBeGreaterThan(0);
     // Admin moves it on; the data-requests inbox works with the session too.
-    await fetch(`${base}/api/admin/cases/${id}`, { method: "PUT", headers: { cookie: admin }, body: JSON.stringify({ status: "data" }) });
-    expect((await (await fetch(`${base}/api/my/cases`, { headers: { cookie } })).json())[0].status).toBe("data");
+    await fetch(`${base}/api/admin/cases/${id}`, { method: "PUT", headers: { cookie: admin }, body: JSON.stringify({ status: "working" }) });
+    expect((await (await fetch(`${base}/api/my/cases`, { headers: { cookie } })).json())[0].status).toBe("working");
     expect((await fetch(`${base}/api/requests`, { headers: { cookie: admin } })).status).toBe(200);
     // Another user cannot submit someone else's property.
     const other = await signIn("other@example.com");

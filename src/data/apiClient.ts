@@ -199,7 +199,7 @@ export const visitLink = (caseId: string) => `${location.origin}/?visit=${encode
 export type UserRole = "buyer" | "seller" | "agent" | "appraiser" | "attorney" | "mortgage_broker" | "other";
 export interface UserDto { id: string; email: string; name?: string; phone?: string; role?: UserRole; agency?: string; license?: string; marketingConsent: boolean }
 export interface MeDto { user: UserDto; isAdmin: boolean }
-export type CaseStatus = "draft" | "submitted" | "data" | "documents" | "review" | "done";
+export type CaseStatus = "draft" | "submitted" | "working" | "prelim_review" | "prelim_sent" | "full_requested" | "full_in_progress" | "full_done" | "closed";
 export interface PipelineCase extends CaseSummaryDto {
   status: CaseStatus; submittedAt?: string; statusAt?: string;
   owner?: { id: string; email: string; name?: string; role?: string };
@@ -215,7 +215,7 @@ const post = (url: string, body?: unknown, method = "POST") =>
   fetch(url, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
 
 export const requestSignInCode = (email: string, lang: "he" | "en") => post("/api/auth/code", { email, lang }).then((r) => jsonOrThrow<{ emailed: boolean }>(r));
-export const verifySignIn = (email: string, code: string) => post("/api/auth/verify", { email, code }).then((r) => jsonOrThrow<MeDto & { isNew: boolean }>(r));
+export const verifySignIn = (email: string, code: string, lang?: "he" | "en") => post("/api/auth/verify", { email, code, lang }).then((r) => jsonOrThrow<MeDto & { isNew: boolean }>(r));
 export const signOut = () => post("/api/auth/logout");
 export async function getMe(): Promise<MeDto | null> {
   const r = await fetch("/api/me");

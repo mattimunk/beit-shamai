@@ -58,6 +58,9 @@ import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts"
 import { parcelsNear } from "./connectors/parcelsOpen";
 import { captureLinkCase, newCaptureLink, revokeCaptureLinks } from "./cases";
 import { tourLayout, upgradeDossier, type Dossier } from "../src/dossier/schema";
+import { handleOps, onUserRegistered, opsTick } from "./ops/routes";
+import { logEvent } from "./ops/store";
+import { onApplicantActivity, resetMarketCache, syncAllTasks, syncCaseTasks } from "./ops/tasks";
 import { adoptOrphans, allCases, caseSummaries, getCase, saveCase, setCaseStatus, userCases, CASE_STATUSES, type CaseStatus } from "./cases";
 import { adminEmails, endSession, isAdminUser, requestCode, sessionCookie, sessionUser, updateProfile, verifyCode, type ProfileInput } from "./auth";
 import { sendMail } from "./mailer";
@@ -102,7 +105,7 @@ export function health(db: ReturnType<typeof openDb>, cfg: SourcesConfig, now = 
   return { ok: true, cities: cfg.cities.map((c) => c.name), sources };
 }
 
-export function createServer(opts: { dbPath?: string; adminToken?: string; port?: number; sources?: SourcesConfig; scheduler?: boolean } = {}) {
+export function createServer(opts: { dbPath?: string; adminToken?: string; port?: number; sources?: SourcesConfig; scheduler?: boolean; opsTick?: boolean } = {}) {
   const db = openDb(opts.dbPath);
   const cfg = opts.sources ?? loadSources();
   const provider = new SqliteProvider(db, cfg);
@@ -188,9 +191,10 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           catch (e) { return json({ error: (e as Error).message }, 400); }
         }
         if (url.pathname === "/api/auth/verify" && req.method === "POST") {
-          const b = (await req.json()) as { email?: string; code?: string };
+          const b = (await req.json()) as { email?: string; code?: string; lang?: string };
           try {
-            const r = verifyCode(db, b.email ?? "", b.code ?? "");
+            const r = verifyCode(db, b.email ?? "", b.code ?? "", Date.now(), b.lang === "en" ? "en" : "he");
+            if (r.created) onUserRegistered(db, r.user);
             return new Response(JSON.stringify({ user: r.user, isNew: r.isNew, isAdmin: isAdminUser(r.user) }), {
               headers: { "content-type": "application/json; charset=utf-8", "set-cookie": sessionCookie(r.token, req) },
             });
@@ -220,7 +224,10 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           if (!c) return json({ error: "not found" }, 404);
           if (c.ownerId && c.ownerId !== u.id && !isAdminUser(u)) return json({ error: "not your property" }, 403);
           if (!c.ownerId) saveCase(db, c.id, c.subject, u.id);
-          if (c.status === "draft") setCaseStatus(db, c.id, "submitted");
+          if (c.status === "draft") {
+            setCaseStatus(db, c.id, "submitted");
+            logEvent(db, { caseId: c.id, userId: u.id, actor: isAdminUser(u) && c.ownerId !== u.id ? u.email : "user", kind: "submitted" });
+          }
           // Open the Tax Authority data request for it (once).
           ensureRequestTables(db);
           const existing = db.query(`SELECT id FROM requests WHERE case_id = ? LIMIT 1`).get(c.id) as { id: string } | null;
@@ -229,6 +236,7 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           for (const to of adminEmails()) {
             sendMail({ to, subject: `נכס חדש הוגש: ${addr}`, text: `נכס חדש הוגש לבדיקה.\n\nכתובת: ${addr}\nמגיש: ${u.name ?? ""} <${u.email}> (${u.role ?? "—"})\n\nהיכנסו לאזור הניהול כדי לטפל.` }).catch(() => {});
           }
+          syncCaseTasks(db, c.id);
           return json({ case: getCase(db, c.id), request });
         }
         if (url.pathname === "/api/admin/cases" && req.method === "GET") {
@@ -247,6 +255,9 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           return json(getCase(db, adminCaseRoute[1]!));
         }
 
+        const ops = await handleOps(req, url, { db, provider, isAdmin, canAccess: (id) => canAccess(id) });
+        if (ops) return ops;
+
         if (url.pathname === "/api/cases" && req.method === "GET") {
           return json(caseSummaries(db, (url.searchParams.get("ids") ?? "").split(",").filter(Boolean)));
         }
@@ -264,7 +275,11 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           if (req.method === "PUT") {
             const b = (await req.json()) as { subject: Subject; dossier?: Dossier };
             if (!b?.subject?.address) return json({ error: "subject required" }, 400);
-            return json(saveCase(db, caseRoute[1]!, b.subject, sessionUser(db, req)?.id, b.dossier ? upgradeDossier(b.dossier) : undefined));
+            const u = sessionUser(db, req);
+            const saved = saveCase(db, caseRoute[1]!, b.subject, u?.id, b.dossier ? upgradeDossier(b.dossier) : undefined);
+            if (u && saved.ownerId === u.id) onApplicantActivity(db, saved.id, "details", u.id);
+            else syncCaseTasks(db, saved.id);
+            return json(saved);
           }
         }
 
@@ -291,7 +306,11 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           if (shotId && req.method === "POST") {
             const f = (await req.formData()).get("file");
             if (!(f instanceof File)) return json({ error: "file required" }, 400);
-            try { return json(await storeCapture(db, caseId, shotId, f)); } catch (e) { return json({ error: (e as Error).message }, 400); }
+            try {
+              const out = await storeCapture(db, caseId, shotId, f);
+              onApplicantActivity(db, caseId, "tour", sessionUser(db, req)?.id);
+              return json(out);
+            } catch (e) { return json({ error: (e as Error).message }, 400); }
           }
         }
         const frameRoute = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/frames\/([^/]+)$/);
@@ -334,7 +353,21 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         }
         if (docRoute && req.method === "POST") {
           const [body, status] = await storeDocument(db, docRoute[1]!, req);
+          if (status < 300) {
+            const u = sessionUser(db, req);
+            const c = getCase(db, docRoute[1]!);
+            if (u && c?.ownerId === u.id) onApplicantActivity(db, docRoute[1]!, "document", u.id);
+            else { logEvent(db, { caseId: docRoute[1]!, actor: u?.email ?? "system", kind: "document_added", data: { kind: (body as any)?.kind } }); syncCaseTasks(db, docRoute[1]!); }
+          }
           return json(body, status);
+        }
+        // The original uploaded file (owner and admins only).
+        const docFile = url.pathname.match(/^\/api\/cases\/([A-Za-z0-9-]{16,64})\/documents\/([A-Za-z0-9-]{8,64})\/file$/);
+        if (docFile && req.method === "GET") {
+          if (tokenCase || !canAccess(docFile[1]!)) return json({ error: "no access to this property" }, 403);
+          const d = db.query(`SELECT file_name, mime, path FROM documents WHERE id = ? AND case_id = ?`).get(docFile[2]!, docFile[1]!) as { file_name: string; mime: string; path: string } | null;
+          if (!d || !existsSync(d.path)) return json({ error: "not found" }, 404);
+          return new Response(Bun.file(d.path), { headers: { "content-type": d.mime || "application/octet-stream", "content-disposition": `${/^(application\/pdf|image\/(png|jpeg|webp))$/.test(d.mime) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(d.file_name)}`, "x-content-type-options": "nosniff" } });
         }
         if (docRoute && req.method === "GET") return json(listDocuments(db, docRoute[1]!));
 
@@ -359,12 +392,18 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
         const upRoute = url.pathname.match(/^\/api\/requests\/([0-9a-f-]{36})\/items\/([0-9a-f-]{36})\/upload$/);
         if (upRoute && req.method === "POST") {
           const text = await readUploadText(req);
-          return json(await uploadToItem(db, upRoute[1]!, upRoute[2]!, text, cfg.layers.parcels));
+          const out = await uploadToItem(db, upRoute[1]!, upRoute[2]!, text, cfg.layers.parcels);
+          resetMarketCache();
+          const rq = getRequest(db, upRoute[1]!);
+          if (rq?.caseId) { logEvent(db, { caseId: rq.caseId, actor: "admin", kind: "market_upload", data: { item: upRoute[2], outcome: (out as any)?.item?.status } }); syncCaseTasks(db, rq.caseId); }
+          return json(out);
         }
         if (url.pathname === "/api/tax/import" && req.method === "POST") {
           const text = await readUploadText(req);
           const out = await runJob(db, "tax-import", "*", () => importTaxExport(db, text, cfg.layers.parcels));
           reconcileAll(db);
+          resetMarketCache();
+          syncAllTasks(db);
           return json(out);
         }
 
@@ -424,7 +463,12 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
     },
   });
   const timer = (opts.scheduler ?? process.env.SCHEDULER === "1") ? startScheduler(db, cfg) : undefined;
-  return { server, db, stop: () => { if (timer) clearInterval(timer); server.stop(true); } };
+  // Operations: tasks, reminders and the email outbox, every 5 minutes.
+  const runOps = opts.opsTick ?? (process.env.NODE_ENV !== "test" && process.env.OPS_TICK !== "0");
+  const opsRun = () => opsTick(db).then((r) => { if (r.reminders || r.sent || r.failed) console.log("[ops]", r); }).catch((e) => console.log("[ops] FAILED", (e as Error).message));
+  const opsTimer = runOps ? setInterval(opsRun, 5 * 60_000) : undefined;
+  if (runOps) setTimeout(opsRun, 15_000);
+  return { server, db, stop: () => { if (timer) clearInterval(timer); if (opsTimer) clearInterval(opsTimer); server.stop(true); } };
 }
 
 if (import.meta.main) {

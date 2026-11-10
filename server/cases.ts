@@ -1,8 +1,7 @@
 /**
  * Property files ("תיקי נכס"): one per property, holding its details. Documents, adverts,
  * visit films and orders hang off the same id. The id is a long random value and acts as the
- * key – whoever has it (the agent's browser, or a filming link sent to a buyer) can open it.
- * There are no user accounts yet.
+ * key for files without an owner; owned files open only for their owner and admins.
  */
 import type { Database } from "bun:sqlite";
 import type { Subject } from "../src/engine/types";
@@ -10,17 +9,26 @@ import { applicationNumber, overallProgress, upgradeDossier, type Dossier } from
 
 export const CASE_ID = /^[A-Za-z0-9-]{16,64}$/;
 
-/** Where a property file stands in the admin pipeline. */
-export type CaseStatus = "draft" | "submitted" | "data" | "documents" | "review" | "done";
-export const CASE_STATUSES: CaseStatus[] = ["draft", "submitted", "data", "documents", "review", "done"];
+/**
+ * The property's overall stage. What is still missing (documents, market data, rooms…) is not
+ * a stage: those are tasks (server/ops.ts), and a property can have several at once.
+ */
+export type CaseStatus =
+  | "draft" | "submitted" | "working" | "prelim_review" | "prelim_sent"
+  | "full_requested" | "full_in_progress" | "full_done" | "closed";
+export const CASE_STATUSES: CaseStatus[] = ["draft", "submitted", "working", "prelim_review", "prelim_sent", "full_requested", "full_in_progress", "full_done", "closed"];
 
 export interface CaseSummary {
   id: string; address: string; updatedAt: string; createdAt: string; shots: number;
   status: CaseStatus; submittedAt?: string; statusAt?: string; appNo?: string; progress?: number;
+  service?: "free" | "full"; assignee?: string;
   owner?: { id: string; email: string; name?: string; role?: string };
   request?: { id: string; status: string; done: number; total: number };
 }
-export interface CaseRecord { id: string; subject: Subject; dossier?: Dossier; appNo?: string; createdAt: string; updatedAt: string; status: CaseStatus; ownerId?: string; submittedAt?: string }
+export interface CaseRecord {
+  id: string; subject: Subject; dossier?: Dossier; appNo?: string; createdAt: string; updatedAt: string; status: CaseStatus;
+  ownerId?: string; submittedAt?: string; statusAt?: string; service: "free" | "full"; assignee?: string;
+}
 
 /** Next application number for this year (BS-26-00001, …). */
 function nextAppNo(db: Database): string {
@@ -29,11 +37,18 @@ function nextAppNo(db: Database): string {
   return applicationNumber((db.query(`SELECT n FROM app_seq WHERE year = ?`).get(y) as { n: number }).n, y);
 }
 
+const ready = new WeakSet<Database>();
 export function ensureCaseTables(db: Database) {
+  if (ready.has(db)) return;
+  ready.add(db);
   db.exec(`CREATE TABLE IF NOT EXISTS cases (id TEXT PRIMARY KEY, subject TEXT, created_at TEXT, updated_at TEXT)`);
-  for (const col of ["owner_id TEXT", "status TEXT DEFAULT 'draft'", "submitted_at TEXT", "status_at TEXT", "dossier TEXT", "app_no TEXT"]) {
+  for (const col of ["owner_id TEXT", "status TEXT DEFAULT 'draft'", "submitted_at TEXT", "status_at TEXT", "dossier TEXT", "app_no TEXT", "service TEXT DEFAULT 'free'", "assignee TEXT"]) {
     try { db.exec(`ALTER TABLE cases ADD COLUMN ${col}`); } catch { /* already there */ }
   }
+  // Stages before the task system (missing items are tasks now, not stages).
+  db.exec(`UPDATE cases SET status = 'working' WHERE status IN ('data', 'documents');
+           UPDATE cases SET status = 'prelim_review' WHERE status = 'review';
+           UPDATE cases SET status = 'prelim_sent' WHERE status = 'done';`);
   db.exec(`CREATE TABLE IF NOT EXISTS app_seq (year INTEGER PRIMARY KEY, n INTEGER)`);
   db.exec(`CREATE TABLE IF NOT EXISTS capture_links (token TEXT PRIMARY KEY, case_id TEXT, created_at INTEGER, expires_at INTEGER, revoked INTEGER DEFAULT 0)`);
 }
@@ -94,6 +109,7 @@ export function getCase(db: Database, id: string): CaseRecord | null {
     ? {
         id: r.id, subject: JSON.parse(r.subject), dossier: r.dossier ? upgradeDossier(JSON.parse(r.dossier)) : undefined, appNo: r.app_no ?? undefined,
         createdAt: r.created_at, updatedAt: r.updated_at, status: r.status ?? "draft", ownerId: r.owner_id ?? undefined, submittedAt: r.submitted_at ?? undefined,
+        statusAt: r.status_at ?? undefined, service: r.service === "full" ? "full" : "free", assignee: r.assignee ?? undefined,
       }
     : null;
 }
@@ -130,6 +146,7 @@ function summarise(db: Database, rows: any[]): CaseSummary[] {
       appNo: r.app_no ?? undefined,
       progress: r.dossier ? overallProgress(upgradeDossier(JSON.parse(r.dossier)), { done: 0, total: 0 }) : undefined,
       status: (r.status ?? "draft") as CaseStatus, submittedAt: r.submitted_at ?? undefined, statusAt: r.status_at ?? undefined,
+      service: r.service === "full" ? "full" : "free", assignee: r.assignee ?? undefined,
       owner: u ? { id: u.id, email: u.email, name: u.name ?? undefined, role: u.role ?? undefined } : undefined,
       request: reqs.get(r.id),
     };
@@ -181,7 +198,7 @@ export function adoptOrphans(db: Database, adminUserId: string): { filesCreated:
     let caseId = byAddress.get(key);
     if (!caseId) {
       caseId = r.case_id && CASE_ID.test(r.case_id) ? r.case_id : crypto.randomUUID();
-      const status: CaseStatus = r.status === "final" ? "review" : "submitted";
+      const status: CaseStatus = r.status === "final" ? "prelim_review" : "submitted";
       db.query(`INSERT OR IGNORE INTO cases (id, subject, created_at, updated_at, owner_id, status, submitted_at, status_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(caseId, r.subject, r.created_at, r.created_at, adminUserId, status, r.created_at, r.created_at);
       byAddress.set(key, caseId);

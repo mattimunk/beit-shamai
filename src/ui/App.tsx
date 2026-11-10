@@ -6,7 +6,8 @@ import { RequestsInbox } from "./RequestsInbox";
 import { shotOrder } from "./CaptureTour";
 import { captureBase, frameUrl, getCapture, getCaseFile, rememberCase, saveCaseFile, type CaptureDto } from "../data/apiClient";
 import { SignIn, Profile } from "./Account";
-import { AdminPipeline, MyProperties, PropertyStrip } from "./Properties";
+import { MyProperties, PropertyStrip } from "./Properties";
+import { AdminApp } from "./admin/AdminApp";
 import { getMe, signOut, submitCase, type CaseStatus, type MeDto } from "../data/apiClient";
 import { Intake } from "./intake/Intake";
 
@@ -76,13 +77,25 @@ export function App() {
   // The intake starts at its welcome screen for a new property; signed-out visitors get it too.
   const [fresh, setFresh] = useState(() => { try { return !sessionStorage.getItem("bs-case-open"); } catch { return true; } });
   const [showSignIn, setShowSignIn] = useState(false);
+  const [startAt, setStartAt] = useState<string | undefined>();
   useEffect(() => {
     if (!live) return;
     getMe().then((m) => {
       setMe(m);
       let open = false;
       try { open = !!sessionStorage.getItem("bs-case-open"); } catch { /* no storage */ }
-      setTab(m ? (open ? "intake" : "mine") : "intake");
+      // A link from an email: ?open=<property>&step=<step> opens that property at that step.
+      const qs = new URLSearchParams(location.search);
+      const link = qs.get("open");
+      if (m && link && /^[A-Za-z0-9-]{16,64}$/.test(link)) {
+        setCaseId(link); rememberCase(link); setFresh(false); setStartAt(qs.get("step") ?? undefined);
+        try { sessionStorage.setItem("bs-case-open", "1"); } catch { /* memory only */ }
+        history.replaceState(null, "", location.pathname);
+        setTab("intake");
+        return;
+      }
+      if (!m && link) setShowSignIn(true);
+      setTab(m ? (m.isAdmin && !open ? "admin" : open ? "intake" : "mine") : "intake");
     }).catch(() => setMe(null));
   }, [live]);
   // What a signed-in user sees of the report follows their role; admins can switch.
@@ -304,7 +317,16 @@ export function App() {
         {live && me === undefined ? (
           <main className="account"><div className="card muted">{t.loading}</div></main>
         ) : live && me === null && showSignIn ? (
-          <SignIn onSignedIn={(m, isNew) => { setMe(m); setShowSignIn(false); setEditProfile(isNew || !m.user.role); setTab("mine"); }} />
+          <SignIn onSignedIn={(m, isNew) => {
+            setMe(m); setShowSignIn(false); setEditProfile(isNew || !m.user.role);
+            const qs = new URLSearchParams(location.search);
+            const link = qs.get("open");
+            if (link && /^[A-Za-z0-9-]{16,64}$/.test(link)) {
+              setCaseId(link); rememberCase(link); setFresh(false); setStartAt(qs.get("step") ?? undefined);
+              history.replaceState(null, "", location.pathname);
+              setTab("intake");
+            } else setTab(m.isAdmin ? "admin" : "mine");
+          }} />
         ) : live && me === null ? (
           <Intake key={`intake-${caseId}`} me={null} caseId={caseId} fresh onSignedIn={(m) => { setMe(m); setTab("intake"); try { sessionStorage.setItem("bs-case-open", "1"); } catch { /* memory only */ } }}
             onSaved={() => setFilesKey((k) => k + 1)} onStatus={setCaseStatus} onSignInInstead={() => setShowSignIn(true)} />
@@ -313,9 +335,9 @@ export function App() {
         ) : tab === "mine" && live ? (
           <MyProperties onOpen={openCase} onNew={newCase} refreshKey={filesKey} />
         ) : tab === "admin" && live && me?.isAdmin ? (
-          <AdminPipeline onOpen={openCase} />
+          <AdminApp me={me.user.email} onOpenRequests={() => setTab("requests")} />
         ) : tab === "intake" && live && me ? (
-          <Intake key={`intake-${caseId}`} me={me} caseId={caseId} fresh={fresh} onSignedIn={setMe}
+          <Intake key={`intake-${caseId}`} me={me} caseId={caseId} fresh={fresh} startAt={startAt} onSignedIn={setMe}
             onSaved={() => { rememberCase(caseId); setFresh(false); try { sessionStorage.setItem("bs-case-open", "1"); } catch { /* memory only */ } setFilesKey((k) => k + 1); }}
             onStatus={(st) => { setCaseStatus(st); setNotice(t.pipeline.submitted); setFilesKey((k) => k + 1); }} />
         ) : tab === "requests" && live ? (

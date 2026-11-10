@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { adminCases, myCases, setCaseStatusAdmin, type CaseStatus, type PipelineCase } from "../data/apiClient";
 import { useT } from "./context";
 
-const STATUSES: CaseStatus[] = ["draft", "submitted", "data", "documents", "review", "done"];
+const STATUSES: CaseStatus[] = ["draft", "submitted", "working", "prelim_review", "prelim_sent", "full_requested", "full_in_progress", "full_done", "closed"];
 
 function ago(iso: string | undefined, lang: string): string {
   if (!iso) return "";
@@ -57,7 +57,7 @@ export function AdminPipeline({ onOpen }: { onOpen: (id: string) => void }) {
   const load = () => adminCases().then(setList).catch((e) => setError((e as Error).message));
   useEffect(() => { load(); }, []);
   const counts = useMemo(() => Object.fromEntries(STATUSES.map((s) => [s, (list ?? []).filter((c) => c.status === s).length])), [list]);
-  const shown = (list ?? []).filter((c) => (filter === "active" ? c.status !== "draft" && c.status !== "done" : c.status === filter));
+  const shown = (list ?? []).filter((c) => (filter === "active" ? c.status !== "draft" && c.status !== "closed" && c.status !== "full_done" : c.status === filter));
   const change = async (c: PipelineCase, status: CaseStatus) => {
     await setCaseStatusAdmin(c.id, status);
     setList((l) => (l ?? []).map((x) => (x.id === c.id ? { ...x, status, statusAt: new Date().toISOString() } : x)));
@@ -67,7 +67,7 @@ export function AdminPipeline({ onOpen }: { onOpen: (id: string) => void }) {
       <div className="props-head"><h2>{P.admin}</h2><button className="ghost" onClick={load}>{P.refresh}</button></div>
       {error && <div className="warnings">{error}</div>}
       <div className="chips">
-        <button className={filter === "active" ? "active" : ""} onClick={() => setFilter("active")}>{P.active} ({(list ?? []).filter((c) => c.status !== "draft" && c.status !== "done").length})</button>
+        <button className={filter === "active" ? "active" : ""} onClick={() => setFilter("active")}>{P.active} ({(list ?? []).filter((c) => c.status !== "draft" && c.status !== "closed" && c.status !== "full_done").length})</button>
         {STATUSES.map((s) => (
           <button key={s} className={filter === s ? "active" : ""} onClick={() => setFilter(s)}>{P.status[s]} ({counts[s] ?? 0})</button>
         ))}

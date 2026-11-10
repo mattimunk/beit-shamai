@@ -23,13 +23,19 @@ export interface User {
   license?: string;
   marketingConsent: boolean;
   createdAt: string;
+  lang: "he" | "en";
+  lastSeen?: string;
+  remindersOptOut: boolean;
 }
 
 const CODE_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 export const SESSION_COOKIE = "bs_session";
 
+const authReady = new WeakSet<Database>();
 export function ensureAuthTables(db: Database) {
+  if (authReady.has(db)) return;
+  authReady.add(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT, phone TEXT, role TEXT, agency TEXT, license TEXT,
@@ -39,6 +45,9 @@ export function ensureAuthTables(db: Database) {
     CREATE INDEX IF NOT EXISTS login_codes_email ON login_codes(email);
     CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT, created_at INTEGER, expires_at INTEGER);
   `);
+  for (const col of ["lang TEXT DEFAULT 'he'", "last_seen TEXT", "reminders_opt_out INTEGER DEFAULT 0"]) {
+    try { db.exec(`ALTER TABLE users ADD COLUMN ${col}`); } catch { /* already there */ }
+  }
 }
 
 const sha256 = (s: string) => new Bun.CryptoHasher("sha256").update(s).digest("hex");
@@ -54,6 +63,7 @@ function rowToUser(r: any): User {
   return {
     id: r.id, email: r.email, name: r.name ?? undefined, phone: r.phone ?? undefined, role: r.role ?? undefined,
     agency: r.agency ?? undefined, license: r.license ?? undefined, marketingConsent: !!r.marketing_consent, createdAt: r.created_at,
+    lang: r.lang === "en" ? "en" : "he", lastSeen: r.last_seen ?? r.last_login ?? undefined, remindersOptOut: !!r.reminders_opt_out,
   };
 }
 
@@ -86,7 +96,7 @@ export async function requestCode(db: Database, emailIn: string, lang: "he" | "e
 }
 
 /** Check a code; on success create the user if new and open a session. */
-export function verifyCode(db: Database, emailIn: string, code: string, now = Date.now()): { token: string; user: User; isNew: boolean } {
+export function verifyCode(db: Database, emailIn: string, code: string, now = Date.now(), lang: "he" | "en" = "he"): { token: string; user: User; isNew: boolean; created: boolean } {
   ensureAuthTables(db);
   const email = normaliseEmail(emailIn);
   const c = code.replace(/\D/g, "");
@@ -107,13 +117,13 @@ export function verifyCode(db: Database, emailIn: string, code: string, now = Da
   const isNew = !row;
   if (!row) {
     const id = crypto.randomUUID();
-    db.query(`INSERT INTO users (id, email, created_at, marketing_consent) VALUES (?, ?, ?, 0)`).run(id, email, new Date(now).toISOString());
+    db.query(`INSERT INTO users (id, email, created_at, marketing_consent, lang) VALUES (?, ?, ?, 0, ?)`).run(id, email, new Date(now).toISOString(), lang);
     row = db.query(`SELECT * FROM users WHERE id = ?`).get(id);
   }
-  db.query(`UPDATE users SET last_login = ? WHERE id = ?`).run(new Date(now).toISOString(), row.id);
+  db.query(`UPDATE users SET last_login = ?, last_seen = ? WHERE id = ?`).run(new Date(now).toISOString(), new Date(now).toISOString(), row.id);
   const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
   db.query(`INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`).run(sha256(token), row.id, now, now + SESSION_TTL_MS);
-  return { token, user: rowToUser(row), isNew: isNew || !row.role };
+  return { token, user: rowToUser(row), isNew: isNew || !row.role, created: isNew };
 }
 
 export function sessionUser(db: Database, req: Request, now = Date.now()): User | null {
@@ -123,7 +133,14 @@ export function sessionUser(db: Database, req: Request, now = Date.now()): User 
   if (!m) return null;
   const s = db.query(`SELECT user_id, expires_at FROM sessions WHERE token_hash = ?`).get(sha256(m[1]!)) as { user_id: string; expires_at: number } | null;
   if (!s || s.expires_at < now) return null;
-  return getUser(db, s.user_id);
+  const u = getUser(db, s.user_id);
+  // Last activity, at most every 10 minutes.
+  if (u && (!u.lastSeen || now - Date.parse(u.lastSeen) > 600_000)) {
+    const at = new Date(now).toISOString();
+    db.query(`UPDATE users SET last_seen = ? WHERE id = ?`).run(at, u.id);
+    u.lastSeen = at;
+  }
+  return u;
 }
 
 export function endSession(db: Database, req: Request) {
@@ -136,7 +153,7 @@ export function sessionCookie(token: string, req: Request, clear = false): strin
   return `${SESSION_COOKIE}=${clear ? "" : token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${clear ? 0 : SESSION_TTL_MS / 1000}${secure ? "; Secure" : ""}`;
 }
 
-export interface ProfileInput { name?: string; phone?: string; role?: string; agency?: string; license?: string; marketingConsent?: boolean }
+export interface ProfileInput { lang?: "he" | "en"; remindersOptOut?: boolean; name?: string; phone?: string; role?: string; agency?: string; license?: string; marketingConsent?: boolean }
 
 export function updateProfile(db: Database, userId: string, pIn: ProfileInput): User {
   let p = pIn;
@@ -155,5 +172,7 @@ export function updateProfile(db: Database, userId: string, pIn: ProfileInput): 
        marketing_consent = ?, consent_at = CASE WHEN ? != marketing_consent THEN ? ELSE consent_at END WHERE id = ?`,
   ).run(clip(p.name, 100) ?? null, p.phone !== undefined ? 1 : 0, p.phone || null, role, clip(p.agency, 100) ?? null, clip(p.license, 30) ?? null,
     consent ? 1 : 0, consent ? 1 : 0, new Date().toISOString(), userId);
+  if (p.lang === "he" || p.lang === "en") db.query(`UPDATE users SET lang = ? WHERE id = ?`).run(p.lang, userId);
+  if (p.remindersOptOut !== undefined) db.query(`UPDATE users SET reminders_opt_out = ? WHERE id = ?`).run(p.remindersOptOut ? 1 : 0, userId);
   return getUser(db, userId)!;
 }

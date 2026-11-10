@@ -22,7 +22,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (me: MeDto, isNew: boolean)
   };
   const verify = async () => {
     setBusy(true); setError(null);
-    try { const r = await verifySignIn(email, code); onSignedIn(r, r.isNew); }
+    try { const r = await verifySignIn(email, code, lang); onSignedIn(r, r.isNew); }
     catch (e) { setError(A.errors[(e as Error).message] ?? (e as Error).message); }
     finally { setBusy(false); }
   };

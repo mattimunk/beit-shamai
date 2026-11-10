@@ -14,6 +14,7 @@ import { PhoneField } from "../PhoneField";
 import { qrSvg } from "../qr";
 import { LegalSection, LocationSection, OccupancySection, PropertySection, ReviewSection, SectionHead, SetupSection, type Up } from "./Sections";
 import { useIT } from "./texts";
+import { Result } from "./Result";
 
 type Stage = "welcome" | "contact" | SectionId;
 
@@ -39,11 +40,13 @@ function dossierFromSubject(s: Subject): Dossier {
  * The conversational intake: welcome → purpose → contact (signed-out only) → location →
  * property → legal → use → tour → summary. Saves as it goes; reopening resumes where it stopped.
  */
-export function Intake({ me, caseId, fresh, onSignedIn, onSaved, onStatus, onSignInInstead }: {
+export function Intake({ me, caseId, fresh, startAt, onSignedIn, onSaved, onStatus, onSignInInstead }: {
   me: MeDto | null;
   caseId: string;
   /** A new property: start at the welcome screen. */
   fresh: boolean;
+  /** Open at this step (a link from an email); "result" shows the outcome on the summary. */
+  startAt?: string;
   onSignedIn: (m: MeDto) => void;
   /** After the first save and when the address changes, so lists refresh. */
   onSaved: () => void;
@@ -78,7 +81,8 @@ export function Intake({ me, caseId, fresh, onSignedIn, onSaved, onStatus, onSig
         setD(dd);
         setAppNo(c.appNo);
         setStatus((c.status ?? "draft") as CaseStatus);
-        setStage(dd.at && SECTIONS.includes(dd.at) ? dd.at : "setup");
+        const want = startAt === "result" ? "review" : startAt;
+        setStage(want && SECTIONS.includes(want as SectionId) ? (want as SectionId) : dd.at && SECTIONS.includes(dd.at) ? dd.at : "setup");
         savedOnce.current = true;
       } else setStage("welcome");
       setLoaded(true);
@@ -154,6 +158,7 @@ export function Intake({ me, caseId, fresh, onSignedIn, onSaved, onStatus, onSig
         {stage === "legal" && <LegalSection {...props} />}
         {stage === "occupancy" && <OccupancySection {...props} />}
         {stage === "tour" && <TourSection d={d} up={up} caseId={caseId} onCaptures={setCaptures} />}
+        {stage === "review" && me && savedOnce.current && <Result caseId={caseId} status={status} onStatus={(st) => { setStatus(st); onStatus(st); }} />}
         {stage === "review" && (
           <ReviewSection {...props} shots={shots} onEdit={(s) => go(s)} onSubmit={submit} submitted={status !== "draft"} submitting={submitting} />
         )}
@@ -223,7 +228,7 @@ function Stepper({ d, stage, shots, pct, onGo, appNo, saving, locked }: {
           {saving === "saving" ? T.ui.saving : saving === "saved" ? `✓ ${T.ui.saved}` : ""}
         </span>
       </div>
-      <div className="bar"><i style={{ width: `${Math.round(pct * 100)}%` }} /></div>
+      <div className="bar"><i style={{ width: `${Math.min(100, pct)}%` }} /></div>
       <ol className="steps">
         {SECTIONS.map((s, k) => {
           const p = s === "tour" ? shots : s === "review" ? { done: 0, total: 0 } : sectionProgress(d, s);
@@ -267,7 +272,7 @@ function ContactStep({ submitter, onDone }: { submitter?: Submitter; onDone: (m:
   const verify = async () => {
     setBusy(true); setError(null);
     try {
-      const r = await verifySignIn(email.trim(), code.trim());
+      const r = await verifySignIn(email.trim(), code.trim(), lang);
       const patch: Record<string, unknown> = {};
       if (name.trim() && !r.user.name) patch.name = name.trim();
       if (phone && !r.user.phone) patch.phone = phone;

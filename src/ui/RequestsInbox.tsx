@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { listDataRequests, requestProgress, uploadTaxExport, uploadTaxExportAny, type PlanItemDto, type RequestDto } from "../data/apiClient";
 import { useT } from "./context";
 
-const TAX_SITE = "https://nadlan.taxes.gov.il/svinfonadlan2010/";
+export const TAX_SITE = "https://nadlan.taxes.gov.il/svinfonadlan2010/";
 const dmy = (iso: string) => iso.split("-").reverse().join("/");
 
 function readToken(): string {
@@ -16,7 +16,7 @@ function keepToken(v: string) {
  * Inbox for whoever has Tax Authority access: open requests, each with the exact searches
  * to run in the "מידע נדל"ן" system and an upload button per search.
  */
-export function RequestsInbox({ onOpen, session = false }: { onOpen?: (r: RequestDto) => void; session?: boolean }) {
+export function RequestsInbox({ onOpen, session = false, onlyRequest, onUploaded }: { onOpen?: (r: RequestDto) => void; session?: boolean; onlyRequest?: string; onUploaded?: () => void }) {
   const { t } = useT();
   const R = t.req;
   const [token, setToken] = useState(readToken);
@@ -55,7 +55,7 @@ export function RequestsInbox({ onOpen, session = false }: { onOpen?: (r: Reques
   };
 
   // A signed-in admin needs no code: the session cookie is enough.
-  useEffect(() => { if (session) load(); }, [session]);
+  useEffect(() => { if (session) load(!!onlyRequest || showAll); }, [session, onlyRequest]);
 
   const criteriaText = (it: PlanItemDto) =>
     `${R.cols.city}: ${it.city}\n${R.cols.kind}: ${it.kind}\n${R.cols.period}: ${dmy(it.from)} – ${dmy(it.to)}\n${R.cols.area}: ${it.areaFrom} – ${it.areaTo}`;
@@ -71,14 +71,15 @@ export function RequestsInbox({ onOpen, session = false }: { onOpen?: (r: Reques
       setNotes((n) => ({ ...n, [it.id]: R.result(i.stored, i.rows, i.partial, i.unlocated) + (out.item.note ? ` ${noteText(out.item.note)}` : "") }));
       setList((l) => (l ?? []).map((x) => (x.id === req.id ? out.request : x)));
       await load(); // one file can also close searches of other open requests
+      onUploaded?.();
     } catch (e) {
       setNotes((n) => ({ ...n, [it.id]: `⚠ ${(e as Error).message}` }));
     }
   };
 
   return (
-    <main className="inbox">
-      <section className="card">
+    <main className={"inbox" + (onlyRequest ? " embedded" : "")}>
+      {!onlyRequest && <section className="card">
         <h2>{R.inbox}</h2>
         <p className="muted">{R.howTo} <a href={TAX_SITE} target="_blank" rel="noreferrer">{R.openSite}</a></p>
         {!session && <div className="inbox-login">
@@ -108,10 +109,10 @@ export function RequestsInbox({ onOpen, session = false }: { onOpen?: (r: Reques
             {anyNote && <pre className="small any-note">{anyNote}</pre>}
           </div>
         )}
-      </section>
+      </section>}
 
       {list && list.length === 0 && <section className="card muted">{R.none}</section>}
-      {list?.map((req) => {
+      {list?.filter((r) => !onlyRequest || r.id === onlyRequest).map((req) => {
         const p = requestProgress(req);
         const s = req.subject;
         return (
