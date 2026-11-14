@@ -43,6 +43,15 @@ It prints PASS / FAIL for each source and saves the raw responses in `tests/fixt
 sudo docker compose cp app:/app/tests/fixtures/live ./live-fixtures && tar czf live-fixtures.tgz live-fixtures
 ```
 
+**Deals without the manual export?** A second check looks at nadlan.gov.il and the over.org.il mirror of the Tax Authority register:
+
+```bash
+sudo docker compose exec app bun run server/probeNadlan.ts        # 5000 = Tel Aviv by default; pass another CBS locality code
+sudo docker compose cp app:/app/tests/fixtures/live ./live-fixtures && tar czf live-fixtures.tgz live-fixtures
+```
+
+It ends with a short "What this means" section. Send the printout and `live-fixtures.tgz` back to Claude.
+
 **If "GovMap deals" FAILS with 403 or a timeout but other sources pass,** the Tax Authority is refusing cloud (data-centre) addresses. Put an Israeli ISP proxy in `.env` as `DEALS_PROXY=http://user:pass@host:port`, then run `sudo docker compose up -d`. Alternatively, run the deals job from a small machine on an Israeli office line.
 
 ## Loading sales data from a file
