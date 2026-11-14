@@ -16,6 +16,17 @@ Every source is tagged with an evidence class. **Completed deals** set value. **
 
 Address search: OpenStreetMap Nominatim by default (free; 1 request/second, attribution shown), or Google Geocoding with `GOOGLE_MAPS_API_KEY`. GovMap's own search is reCAPTCHA-protected. Its official JavaScript API needs a domain-bound token from the Survey of Israel.
 
+## Tax Authority deals: other routes being checked (Nov 2026)
+
+Bizportal's comparables calculator (Nov 2026) uses the same Tax Authority deals. These are possible routes that avoid the manual export. `server/probeNadlan.ts` checks them from the server.
+
+| Route | What it gives | Known limits |
+|---|---|---|
+| nadlan.gov.il (reopened 30 Sep 2026, no login) | Per-deal: address, rooms, floor, area, year built, building floors, earlier sales of the unit | Per-deal calls are reported to need reCAPTCHA + request signing; Israeli residential IPs only. The probe scans the site's scripts to confirm |
+| data.nadlan.gov.il static JSON (`/api/pages/settlement/buy/{code}.json`) | Price indices by settlement / neighbourhood and room count, quarterly | No per-deal records |
+| over.org.il ("גרסאות לעם") MCP mirror | Whole register from 1998: date, price, type, area, rooms, floor, block/parcel; lookups by city, address, block/parcel | Google sign-in (OAuth); terms of use not yet checked |
+| Paid scrapers (e.g. Apify "nadlan-gov-deals") | Same data, from about $10 per 1,000 deals | Third party; terms and reliability unknown |
+
 ## Tax Authority deals: request workflow (manual export)
 
 The Tax Authority's "מערכת מידע נדל"ן" (nadlan.taxes.gov.il) needs a personal login and caps
