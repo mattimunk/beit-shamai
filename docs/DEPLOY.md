@@ -66,6 +66,15 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/csv" \
 
 Columns, in Hebrew or English: תאריך עסקה (date), מחיר (price), ישוב (city), רחוב (street), מספר בית (number), גוש/חלקה/תת חלקה (block/parcel/sub-parcel), שטח (area), חדרים (rooms), קומה (floor), קומות בבניין, שנת בנייה. Missing coordinates are looked up automatically. Then run the matching job for the city.
 
+## Connect Over (once, 2 minutes)
+
+Over (over.org.il) gives each report an early set of Tax Authority deals and shrinks the searches to upload (see docs/DATA_SOURCES.md).
+
+1. Sign in to the app as admin and open **Data requests**.
+2. Click **Connect Over (Google)**, sign in with a Google account on over.org.il, and allow access. You come back to a page saying Over is connected; open requests are pulled straight away.
+
+The server keeps Over's tokens (not the Google account) and refreshes them. If the sign-in link points at the wrong address (e.g. behind a proxy), set `PUBLIC_URL=https://your.domain` in `.env`. Optional: `OVER_RADIUS_M` (default 1000), `OVER_MARGIN_DAYS` (default 30), `OVER_PROXY`, and `OVER_CLIENT_ID` / `OVER_CLIENT_SECRET` if Over issues this server a client of its own.
+
 ## 4. Choose the cities
 
 Edit `config/sources.json` (`nano config/sources.json`). Each city needs its name as written in Tax Authority records, a centre point, a radius and its CBS district:

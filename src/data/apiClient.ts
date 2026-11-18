@@ -55,11 +55,31 @@ export async function uploadDocument(caseId: string, file: File, kind: string): 
 
 export interface PlanItemDto {
   id: string; city: string; kind: string; from: string; to: string; areaFrom: number; areaTo: number;
-  status: "pending" | "done" | "covered" | "truncated" | "split"; note?: string; parentId?: string;
+  status: "pending" | "done" | "covered" | "truncated" | "split" | "over"; note?: string; parentId?: string;
 }
+export interface OverDetailDto {
+  scrapedAt?: string; lastDeal?: string; cityLastDeal?: string; through?: string;
+  blocks: number[]; blocksPulled: number; blocksCached: number; rows: number; stored: number;
+  excluded: Record<string, number>; unlocated: number; error?: string;
+}
+export interface OverCompareRow { id: string; date: string; price: number; parcel: string; rooms?: number; area?: number; fraction?: number; copies?: number }
+export interface OverCompareDto { missing: OverCompareRow[]; merged: OverCompareRow[]; newer: OverCompareRow[]; matched: number }
 export interface RequestDto {
   id: string; createdAt: string; status: "preliminary" | "final"; finalAt?: string; subject: Subject; caseId?: string; items: PlanItemDto[];
+  over?: { status: "running" | "done" | "failed"; through?: string; detail?: OverDetailDto };
 }
+
+const adminCall = async <T,>(token: string, path: string, method = "GET"): Promise<T> => {
+  const r = await fetch(path, { method, headers: token ? { authorization: `Bearer ${token}` } : {} });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error ?? `${path} ${r.status}`);
+  return j as T;
+};
+export const overStatus = (token: string) => adminCall<{ connected: boolean; connectedAt?: string }>(token, "/api/over/status");
+export const overConnect = (token: string) => adminCall<{ url: string }>(token, "/api/over/connect", "POST");
+export const overDisconnect = (token: string) => adminCall<{ connected: boolean }>(token, "/api/over/disconnect", "POST");
+export const overPull = (token: string, requestId: string) => adminCall<{ request: RequestDto }>(token, `/api/requests/${requestId}/over`, "POST");
+export const overCompare = (token: string, requestId: string) => adminCall<OverCompareDto | null>(token, `/api/requests/${requestId}/over-compare`);
 
 export async function createDataRequest(subject: Subject, caseId?: string): Promise<RequestDto> {
   const r = await fetch("/api/requests", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ subject, caseId }) });

@@ -71,6 +71,16 @@ export function upsertDeals(db: Database, deals: Deal[]): number {
   return deals.length;
 }
 
+/** Insert deals whose id is not stored yet; never overwrites (an uploaded export wins over Over). */
+export function insertDealsIfAbsent(db: Database, deals: Deal[]): number {
+  const stmt = db.prepare(`INSERT OR IGNORE INTO deals (id, city, lat, lng, date, parcel_key, json) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  let n = 0;
+  db.transaction((rows: Deal[]) => {
+    for (const d of rows) n += stmt.run(d.id, d.address.city, d.location.lat, d.location.lng, d.date, d.parcel ? parcelKeyOf(d.parcel) : null, JSON.stringify(d)).changes;
+  })(deals);
+  return n;
+}
+
 export function dealsNear(db: Database, lat: number, lng: number, radiusM: number, sinceIso = "0000"): Deal[] {
   const b = bbox(lat, lng, radiusM);
   return db

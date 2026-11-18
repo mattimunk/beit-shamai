@@ -15,12 +15,17 @@ import { normaliseCity } from "../src/engine/address";
 import { ensureTaxTables, importTaxExport, type TaxImportResult } from "./taxImport";
 import { normaliseTaxCity, parseTaxExport } from "./connectors/taxExport";
 import type { ParcelLayer } from "./connectors/parcels";
+import { ensureOverDealTables, type OverPullDetail } from "./overDeals";
 
 /**
  * Row notes are codes, shown in the user's language by the app:
- *   split | remaining | truncated:<total> | cut_upload | no_overlap | city:<file city>
+ *   split | remaining | truncated:<total> | cut_upload | no_overlap | city:<file city> |
+ *   over (dates Over covers: upload recommended) | after_over (dates after Over's snapshot)
+ *
+ * "over": the dates are covered by Over (over.org.il) provisionally. They don't hold the report
+ * back, but an upload is still recommended: Over misses some rows and merges identical ones.
  */
-export type ItemStatus = "pending" | "done" | "covered" | "truncated" | "split";
+export type ItemStatus = "pending" | "done" | "covered" | "truncated" | "split" | "over";
 
 export interface PlanItem {
   id: string;
@@ -46,6 +51,8 @@ export interface RequestRecord {
   /** The app's case (documents, adverts, visit capture) this order belongs to. */
   caseId?: string;
   items: PlanItem[];
+  /** Over pull: running | done | failed (absent: Over not used for this request). */
+  over?: { status: string; through?: string; detail?: OverPullDetail };
 }
 
 const DAY = 86_400_000;
@@ -63,6 +70,13 @@ export function ensureRequestTables(db: Database) {
     CREATE INDEX IF NOT EXISTS plan_items_req ON plan_items(request_id);
   `);
   try { db.exec(`ALTER TABLE requests ADD COLUMN case_id TEXT`); } catch { /* already there */ }
+  ensureOverDealTables(db);
+}
+
+/** The date up to which Over covers a request (already less the safety margin), if any. */
+function overThrough(db: Database, requestId: string): number | undefined {
+  const r = db.query(`SELECT over_status, over_through FROM requests WHERE id = ?`).get(requestId) as { over_status?: string; over_through?: string } | null;
+  return r?.over_status === "done" && r.over_through ? Date.parse(r.over_through) / DAY : undefined;
 }
 
 /** Area band searched for a subject of area A (sqm): roughly −25% … +35%. */
@@ -153,8 +167,9 @@ export function reconcileRequest(db: Database, requestId: string, todayDays = Da
   // A few passes: an area split creates searches that the date check can then close.
   for (let pass = 0; pass < 4; pass++) {
     let changed = false;
-    const rows = (db.query(`SELECT * FROM plan_items WHERE request_id = ? AND status = 'pending'`).all(requestId) as any[]).map(rowToItem);
-    for (const it of rows) changed = reconcileItem(db, it, todayDays) || changed;
+    const rows = (db.query(`SELECT * FROM plan_items WHERE request_id = ? AND status IN ('pending', 'over')`).all(requestId) as any[]).map(rowToItem);
+    const through = overThrough(db, requestId);
+    for (const it of rows) changed = reconcileItem(db, it, todayDays, through) || changed;
     if (!changed) break;
   }
   refreshStatus(db, requestId);
@@ -167,8 +182,16 @@ export function reconcileRequest(db: Database, requestId: string, todayDays = Da
  *  2. Dates: within a band fully covered by uploads, close the covered dates and list the
  *     remaining dates as new searches.
  */
-function reconcileItem(db: Database, it: PlanItem, todayDays: number): boolean {
+function reconcileItem(db: Database, it: PlanItem, todayDays: number, through?: number): boolean {
   const pulls = cityPulls(db, it.city);
+  if (it.status === "over") {
+    // Dates Over covers: closed for good only by uploads that cover the whole search.
+    const { covered, gaps } = dateCoverage(it, pulls, todayDays);
+    const whole = (covered.length && !gaps.length ? covered[0]!.id : null) ?? coveringPull(db, it);
+    if (!whole) return false;
+    db.query(`UPDATE plan_items SET status = 'covered', pull_id = ?, note = NULL WHERE id = ?`).run(whole, it.id);
+    return true;
+  }
   const from = Date.parse(it.from) / DAY, to = Date.parse(it.to) / DAY;
   const overlapping = pulls.filter((p) => p.to >= from && p.from <= to && p.aTo >= it.areaFrom && p.aFrom <= it.areaTo);
   const cuts = new Set<number>();
@@ -188,7 +211,7 @@ function reconcileItem(db: Database, it: PlanItem, todayDays: number): boolean {
   const { covered, gaps } = dateCoverage(it, pulls, todayDays);
   if (!covered.length) {
     const byArea = coveringPull(db, it); // adjacent area bands over the whole period
-    if (!byArea) return false;
+    if (!byArea) return overItem(db, it, through);
     db.query(`UPDATE plan_items SET status = 'covered', pull_id = ? WHERE id = ?`).run(byArea, it.id);
     return true;
   }
@@ -200,6 +223,29 @@ function reconcileItem(db: Database, it: PlanItem, todayDays: number): boolean {
   for (const c of covered) insertItem(db, { ...b2, id: crypto.randomUUID(), from: dayIso(c.a), to: dayIso(c.b), status: "covered", pullId: c.id });
   for (const g of gaps) insertItem(db, { ...b2, id: crypto.randomUUID(), from: dayIso(g.a), to: dayIso(g.b), status: "pending", note: "remaining" });
   db.query(`UPDATE plan_items SET status = 'split', note = 'split' WHERE id = ?`).run(it.id);
+  return true;
+}
+
+/**
+ * An open search not covered by uploads: dates up to Over's cover become "over" (upload
+ * recommended, not required); a search that straddles that date is split there.
+ */
+function overItem(db: Database, it: PlanItem, through?: number): boolean {
+  if (through === undefined) return false;
+  const from = Date.parse(it.from) / DAY, to = Date.parse(it.to) / DAY;
+  if (from > through) {
+    if (it.note) return false;
+    db.query(`UPDATE plan_items SET note = 'after_over' WHERE id = ?`).run(it.id);
+    return true;
+  }
+  if (to <= through) {
+    db.query(`UPDATE plan_items SET status = 'over', note = 'over' WHERE id = ?`).run(it.id);
+    return true;
+  }
+  const base = { requestId: it.requestId, parentId: it.id, city: it.city, kind: it.kind, areaFrom: it.areaFrom, areaTo: it.areaTo };
+  insertItem(db, { ...base, id: crypto.randomUUID(), from: it.from, to: dayIso(through), status: "over", note: "over" });
+  insertItem(db, { ...base, id: crypto.randomUUID(), from: dayIso(through + 1), to: it.to, status: "pending", note: "after_over" });
+  db.query(`UPDATE plan_items SET status = 'split', note = 'split_over' WHERE id = ?`).run(it.id);
   return true;
 }
 
@@ -300,7 +346,10 @@ export function getRequest(db: Database, id: string, reconcile = false): Request
   const r: any = db.query(`SELECT * FROM requests WHERE id = ?`).get(id);
   if (!r) return null;
   const items = (db.query(`SELECT * FROM plan_items WHERE request_id = ? ORDER BY date_to DESC, area_from`).all(id) as any[]).map(rowToItem);
-  return { id: r.id, createdAt: r.created_at, status: r.status, finalAt: r.final_at ?? undefined, subject: JSON.parse(r.subject), caseId: r.case_id ?? undefined, items };
+  const over = r.over_status
+    ? { status: r.over_status as string, through: (r.over_through as string | null) ?? undefined, detail: r.over_detail ? (JSON.parse(r.over_detail) as OverPullDetail) : undefined }
+    : undefined;
+  return { id: r.id, createdAt: r.created_at, status: r.status, finalAt: r.final_at ?? undefined, subject: JSON.parse(r.subject), caseId: r.case_id ?? undefined, items, over };
 }
 
 export function listRequests(db: Database, onlyOpen = true): RequestRecord[] {
