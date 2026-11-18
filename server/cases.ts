@@ -128,8 +128,8 @@ function summarise(db: Database, rows: any[]): CaseSummary[] {
   try {
     reqs = new Map((db.query(
       `SELECT r.case_id, r.id, r.status,
-         SUM(CASE WHEN p.status IN ('done','covered') THEN 1 ELSE 0 END) AS done,
-         SUM(CASE WHEN p.status IN ('done','covered','pending') THEN 1 ELSE 0 END) AS total
+         SUM(CASE WHEN p.status IN ('done','covered','over') THEN 1 ELSE 0 END) AS done,
+         SUM(CASE WHEN p.status IN ('done','covered','pending','over') THEN 1 ELSE 0 END) AS total
        FROM requests r LEFT JOIN plan_items p ON p.request_id = r.id
        WHERE r.case_id IN (${ph}) GROUP BY r.id ORDER BY r.created_at`,
     ).all(...ids) as any[]).map((r) => [r.case_id, { id: r.id, status: r.status, done: r.done ?? 0, total: r.total ?? 0 }]));

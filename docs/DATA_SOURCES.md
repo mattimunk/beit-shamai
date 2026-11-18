@@ -16,16 +16,24 @@ Every source is tagged with an evidence class. **Completed deals** set value. **
 
 Address search: OpenStreetMap Nominatim by default (free; 1 request/second, attribution shown), or Google Geocoding with `GOOGLE_MAPS_API_KEY`. GovMap's own search is reCAPTCHA-protected. Its official JavaScript API needs a domain-bound token from the Survey of Israel.
 
-## Tax Authority deals: other routes being checked (Nov 2026)
+## Tax Authority deals: Over first, upload to finish (Nov 2026)
 
-Bizportal's comparables calculator (Nov 2026) uses the same Tax Authority deals. These are possible routes that avoid the manual export. `server/probeNadlan.ts` checks them from the server.
+**Over** (over.org.il, "גרסאות לעם") mirrors the Tax Authority register and serves it over MCP behind a Google sign-in. Bizportal's comparables calculator runs on it. Checked 14–18 Nov 2026:
 
-| Route | What it gives | Known limits |
-|---|---|---|
-| nadlan.gov.il (reopened 30 Sep 2026, no login) | Per-deal: address, rooms, floor, area, year built, building floors, earlier sales of the unit | Per-deal calls are reported to need reCAPTCHA + request signing; Israeli residential IPs only. The probe scans the site's scripts to confirm |
-| data.nadlan.gov.il static JSON (`/api/pages/settlement/buy/{code}.json`) | Price indices by settlement / neighbourhood and room count, quarterly | No per-deal records |
-| over.org.il ("גרסאות לעם") MCP mirror | Whole register from 1998: date, price, type, area, rooms, floor, block/parcel; lookups by city, address, block/parcel | Google sign-in (OAuth); terms of use not yet checked |
-| Paid scrapers (e.g. Apify "nadlan-gov-deals") | Same data, from about $10 per 1,000 deals | Third party; terms and reliability unknown |
+- Over is a snapshot: newest sale 17 Sep 2026, taken 19 Sep (Jerusalem: newest 24 Aug). Two months behind.
+- It misses some rows (a ₪5M sale on 30079/213/000, 3 Jun 2026) and merges identical rows (8 heirs × 11.1% on one day became one row).
+- Address search on Over misses sales: it links addresses to parcels itself and many parcels have none. Searching by block finds them.
+- It has no floor and no address; block/parcel/sub-parcel, date, amount, deal type, area, rooms, year built, share sold.
+
+How the system uses it (`server/overDeals.ts`, `server/connectors/over.ts`):
+
+1. **Early picture.** When a request is opened and Over is connected, the server pulls every block with a parcel within `OVER_RADIUS_M` (default 1000 m) of the property, plus its own block, for the last 12 months. Each block is paged to the end (Over's total stops at 10,000). Deal types are filtered here: apartments, garden/roof flats, "ד. מגורים", cottages and detached houses are kept; others are counted and shown. Pulls are cached per block and Over snapshot.
+2. **Smaller upload.** Over is taken to cover up to its newest sale for the city, less `OVER_MARGIN_DAYS` (default 30; late registrations). Searches up to that date become **"Covered by Over · upload recommended"**: they don't hold the report back. Searches after it still need an upload before the report is final; a search that straddles the date is split there.
+3. **Check.** Uploaded rows and Over rows share one id per sale (block, parcel, sub-parcel, date, amount; identical rows in one file get #2, #3 …), so a sale is stored once and an upload always replaces Over's copy. The inbox's "Check against uploaded files" lists sales missing from Over, sales Over merged, and sales newer than Over's snapshot.
+
+Exports uploaded before this change kept only one of several identical rows. Upload those periods again if part-sales matter there.
+
+Other routes checked: nadlan.gov.il uses reCAPTCHA Enterprise and gets its deals through GovMap (also reCAPTCHA); data.nadlan.gov.il refuses cloud addresses (403) and has indices only. Paid scrapers of GovMap, Madlan and Yad2 exist but work around those sites' blocks or terms. A licence from Madlan or Yad2 is the clean backup.
 
 ## Tax Authority deals: request workflow (manual export)
 
