@@ -23,14 +23,21 @@ export function OverLine({ req, token, onChanged }: { req: RequestDto; token: st
     const h = setTimeout(() => listDataRequests(token, true).then((l) => { const r = l.find((x) => x.id === req.id); if (r) onChanged(r); }).catch(() => {}), 4000);
     return () => clearTimeout(h);
   }, [o?.status, req.id]);
-  if (!o) return null;
-  const d = o.detail;
-  const excluded = d ? Object.values(d.excluded).reduce((a, b) => a + b, 0) : 0;
   const again = async () => {
     setBusy(true); setErr(null);
     try { onChanged((await overPull(token, req.id)).request); } catch (e) { setErr((e as Error).message); }
     setBusy(false);
   };
+  if (!o)
+    return (
+      <div className="over-line small">
+        <span className="muted">{O.never}</span>{" "}
+        <button className="ghost" disabled={busy} onClick={again}>{O.pull}</button>
+        {err && <div className="warnings">{err}</div>}
+      </div>
+    );
+  const d = o.detail;
+  const excluded = d ? Object.values(d.excluded).reduce((a, b) => a + b, 0) : 0;
   const rows = (list: OverCompareRow[], copies = false) => (
     <ul className="small">
       {list.map((x) => (
