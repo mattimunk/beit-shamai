@@ -133,16 +133,38 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
       .then((d) => {
         reconcileRequest(db, requestId);
         resetMarketCache();
+        // The property's tasks follow at once (enough nearby sales now, fewer searches to upload).
+        const c = db.query(`SELECT case_id FROM requests WHERE id = ?`).get(requestId) as { case_id: string | null } | null;
+        if (c?.case_id) syncCaseTasks(db, c.case_id);
         if (d.error) console.log("[over] pull failed", requestId, d.error);
       })
       .catch((e) => console.log("[over] pull failed", requestId, (e as Error).message)));
   };
-  // With the scheduler on, open requests never pulled from Over (e.g. from before) are pulled once.
+  /**
+   * Every active property gets a data request and an Over pull, including properties
+   * submitted before requests existed or created another way.
+   */
+  const ACTIVE_CASES = ["submitted", "working", "prelim_review", "prelim_sent", "full_requested", "full_in_progress"];
+  const ensureCaseRequest = (caseId: string) => {
+    try {
+      ensureRequestTables(db);
+      const c = getCase(db, caseId);
+      if (!c || !ACTIVE_CASES.includes(c.status) || !c.subject.address.city) return;
+      const r = db.query(`SELECT id, over_status FROM requests WHERE case_id = ? ORDER BY created_at DESC LIMIT 1`).get(caseId) as { id: string; over_status: string | null } | null;
+      if (!r) pullOver(createRequest(db, c.subject, undefined, caseId).id);
+      else if (!r.over_status) pullOver(r.id);
+    } catch (e) { console.log("[over] request for property skipped", caseId, (e as Error).message); }
+  };
+  // With the scheduler on: at start-up, give every active property a request and pull Over where it
+  // never ran (or was cut short by a restart).
   if (process.env.SCHEDULER === "1" && overOn()) {
     setTimeout(() => {
       try {
         ensureRequestTables(db);
-        for (const r of db.query(`SELECT id FROM requests WHERE status = 'preliminary' AND over_status IS NULL`).all() as { id: string }[]) pullOver(r.id);
+        db.query(`UPDATE requests SET over_status = NULL WHERE over_status = 'running'`).run();
+        const cases = db.query(`SELECT id FROM cases WHERE status IN (${ACTIVE_CASES.map(() => "?").join(",")})`).all(...ACTIVE_CASES) as { id: string }[];
+        for (const c of cases) ensureCaseRequest(c.id);
+        for (const r of db.query(`SELECT id FROM requests WHERE status = 'preliminary' AND over_status IS NULL AND case_id IS NULL`).all() as { id: string }[]) pullOver(r.id);
       } catch (e) { console.log("[over] start-up pull skipped", (e as Error).message); }
     }, 10_000);
   }
@@ -285,7 +307,7 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           return json(getCase(db, adminCaseRoute[1]!));
         }
 
-        const ops = await handleOps(req, url, { db, provider, isAdmin, canAccess: (id) => canAccess(id) });
+        const ops = await handleOps(req, url, { db, provider, isAdmin, canAccess: (id) => canAccess(id), ensureCaseRequest });
         if (ops) return ops;
 
         if (url.pathname === "/api/cases" && req.method === "GET") {
