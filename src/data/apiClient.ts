@@ -58,12 +58,12 @@ export interface PlanItemDto {
   status: "pending" | "done" | "covered" | "truncated" | "split" | "over"; note?: string; parentId?: string;
 }
 export interface OverDetailDto {
-  scrapedAt?: string; lastDeal?: string; cityLastDeal?: string; through?: string;
-  blocks: number[]; blocksPulled: number; blocksCached: number; rows: number; stored: number;
-  excluded: Record<string, number>; unlocated: number; error?: string;
+  taxNewest?: string; govmapNewest?: string; through?: string;
+  blocks: number[]; blocksPulled: number; blocksCached: number; rows: number; govmapRows: number; taxRows: number; stored: number;
+  excluded: Record<string, number>; unlocated: number; blind: number[]; taxMissing: number[]; govmapMissing: number[]; error?: string;
 }
 export interface OverCompareRow { id: string; date: string; price: number; parcel: string; rooms?: number; area?: number; fraction?: number; copies?: number }
-export interface OverCompareDto { missing: OverCompareRow[]; merged: OverCompareRow[]; newer: OverCompareRow[]; matched: number }
+export interface OverCompareDto { missing: OverCompareRow[]; missingTaxCopy: OverCompareRow[]; merged: OverCompareRow[]; newer: OverCompareRow[]; matched: number }
 export interface RequestDto {
   id: string; createdAt: string; status: "preliminary" | "final"; finalAt?: string; subject: Subject; caseId?: string; items: PlanItemDto[];
   over?: { status: "running" | "done" | "failed"; through?: string; detail?: OverDetailDto };
@@ -75,9 +75,6 @@ const adminCall = async <T,>(token: string, path: string, method = "GET"): Promi
   if (!r.ok) throw new Error(j?.error ?? `${path} ${r.status}`);
   return j as T;
 };
-export const overStatus = (token: string) => adminCall<{ connected: boolean; connectedAt?: string }>(token, "/api/over/status");
-export const overConnect = (token: string) => adminCall<{ url: string }>(token, "/api/over/connect", "POST");
-export const overDisconnect = (token: string) => adminCall<{ connected: boolean }>(token, "/api/over/disconnect", "POST");
 export const overPull = (token: string, requestId: string) => adminCall<{ request: RequestDto }>(token, `/api/requests/${requestId}/over`, "POST");
 export const overCompare = (token: string, requestId: string) => adminCall<OverCompareDto | null>(token, `/api/requests/${requestId}/over-compare`);
 

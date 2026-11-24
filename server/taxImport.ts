@@ -5,7 +5,7 @@
  */
 import type { Database } from "bun:sqlite";
 import type { Deal } from "../src/engine/types";
-import { upsertDeals } from "./db";
+import { dropOverCopies, upsertDeals } from "./db";
 import { parseTaxExport, type TaxCriteria, type TaxRow } from "./connectors/taxExport";
 import { locateParcel, type ParcelLayer } from "./connectors/parcels";
 
@@ -101,6 +101,7 @@ export async function importTaxExport(
     deals.push(rowToDeal(row, loc, occ[i]));
   }
   upsertDeals(db, deals);
+  dropOverCopies(db, deals); // an upload replaces Over's copies of the same sales
   const pullId = crypto.randomUUID();
   const c = exp.criteria;
   db.query(
@@ -131,7 +132,9 @@ export async function relocateUnlocated(db: Database, layer: ParcelLayer | undef
     const row = JSON.parse(r.row) as TaxRow & { occurrence?: number };
     const loc = await locateParcel(db, layer, row.block, row.parcel, fetchImpl).catch(() => null);
     if (!loc) continue;
-    upsertDeals(db, [rowToDeal(row, loc, row.occurrence ?? 1)]);
+    const d = rowToDeal(row, loc, row.occurrence ?? 1);
+    upsertDeals(db, [d]);
+    dropOverCopies(db, [d]);
     db.query(`DELETE FROM unlocated_deals WHERE id = ?`).run(r.id);
     placed++;
   }

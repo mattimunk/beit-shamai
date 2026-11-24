@@ -315,8 +315,6 @@ table.plan { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.plan th, table.plan td { padding: 6px 8px; border-bottom: 1px solid var(--c-line); text-align: start; vertical-align: top; }
 table.plan tr.st-done, table.plan tr.st-covered, table.plan tr.st-truncated { color: var(--c-ink-2); }
 table.plan tr.st-over td:nth-child(5) { color: var(--c-accent); }
-.over-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--c-line); border-radius: 8px; }
-.over-panel .muted { flex-basis: 100%; }
 .over-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
 .over-line details { flex-basis: 100%; }
 .over-line ul { margin: 4px 0; padding-inline-start: 18px; }

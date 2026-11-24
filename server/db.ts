@@ -81,6 +81,50 @@ export function insertDealsIfAbsent(db: Database, deals: Deal[]): number {
   return n;
 }
 
+/**
+ * One sale, several sources. A sale is identified by its parcel (with sub-parcel) and date; the
+ * amount is left out because sources disagree on it (GovMap shows a sale by 9 heirs as one row
+ * at the full price, the Tax Authority as 9 rows of 11.1%).
+ */
+export const OVER_SOURCE = "over.org.il";
+const isOver = (d: Deal) => d.source.startsWith(OVER_SOURCE);
+const isUpload = (d: Deal) => d.source.startsWith("tax_authority_export");
+const whole = (d: Deal) => d.fractionSold === undefined || d.fractionSold >= 0.999;
+
+function dealsAt(db: Database, parcelKey: string, date: string): Deal[] {
+  return (db.query(`SELECT json FROM deals WHERE parcel_key = ? AND date = ?`).all(parcelKey, date) as { json: string }[]).map((r) => JSON.parse(r.json) as Deal);
+}
+
+/** An uploaded export already has this sale for the whole unit: Over's copy is not needed. */
+export function uploadHasSale(db: Database, parcelKey: string, date: string): boolean {
+  return dealsAt(db, parcelKey, date).some((d) => isUpload(d) && whole(d));
+}
+
+/**
+ * After an upload: remove Over's copies of the sales it holds for the whole unit. Where the
+ * upload holds only part-sales (heirs, co-owners), Over's whole-sale GovMap row is kept: the
+ * engine leaves part-sales out, so that row is the only evidence of the sale's full price.
+ */
+export function dropOverCopies(db: Database, uploaded: Deal[]): number {
+  const keep = new Set(uploaded.map((d) => d.id));
+  const keys = new Map<string, { parcelKey: string; date: string }>();
+  for (const d of uploaded) if (d.parcel && whole(d)) keys.set(`${parcelKeyOf(d.parcel)}@${d.date}`, { parcelKey: parcelKeyOf(d.parcel), date: d.date });
+  const del = db.prepare(`DELETE FROM deals WHERE id = ?`);
+  let n = 0;
+  for (const { parcelKey, date } of keys.values()) {
+    for (const d of dealsAt(db, parcelKey, date)) if (isOver(d) && !keep.has(d.id)) n += del.run(d.id).changes;
+  }
+  return n;
+}
+
+/** Remove Over deals at a sale other than the ones given (a GovMap row replaces the Tax Authority copy). */
+export function dropOtherOverCopies(db: Database, parcelKey: string, date: string, keepIds: string[]): number {
+  const del = db.prepare(`DELETE FROM deals WHERE id = ?`);
+  let n = 0;
+  for (const d of dealsAt(db, parcelKey, date)) if (isOver(d) && !keepIds.includes(d.id)) n += del.run(d.id).changes;
+  return n;
+}
+
 export function dealsNear(db: Database, lat: number, lng: number, radiusM: number, sinceIso = "0000"): Deal[] {
   const b = bbox(lat, lng, radiusM);
   return db

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  listDataRequests, overCompare, overConnect, overDisconnect, overPull, overStatus, requestProgress, uploadTaxExport, uploadTaxExportAny,
+  listDataRequests, overCompare, overPull, requestProgress, uploadTaxExport, uploadTaxExportAny,
   type OverCompareDto, type OverCompareRow, type PlanItemDto, type RequestDto,
 } from "../data/apiClient";
 import { useT } from "./context";
@@ -8,30 +8,6 @@ import { useT } from "./context";
 export const TAX_SITE = "https://nadlan.taxes.gov.il/svinfonadlan2010/";
 const dmy = (iso: string) => iso.split("-").reverse().join("/");
 const nis = (n: number) => `₪${Math.round(n).toLocaleString("en")}`;
-
-/** Over connection: status and the one-time Google sign-in. */
-export function OverPanel({ token }: { token: string }) {
-  const { t } = useT();
-  const O = t.req.over;
-  const [st, setSt] = useState<{ connected: boolean; connectedAt?: string } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const load = () => overStatus(token).then(setSt).catch((e) => setErr((e as Error).message));
-  useEffect(() => { load(); }, [token]);
-  const connect = async () => {
-    setErr(null);
-    try { window.location.href = (await overConnect(token)).url; } catch (e) { setErr((e as Error).message); }
-  };
-  if (!st && !err) return null;
-  return (
-    <div className="over-panel">
-      <b>{O.title}</b> <span className={"badge " + (st?.connected ? "final" : "preliminary")}>{st?.connected ? O.connected(st.connectedAt) : O.notConnected}</span>
-      <button className={st?.connected ? "ghost" : "primary"} onClick={connect}>{st?.connected ? O.reconnect : O.connect}</button>
-      {st?.connected && <button className="ghost" onClick={async () => { await overDisconnect(token); load(); }}>{O.disconnect}</button>}
-      <div className="muted small">{O.help}</div>
-      {err && <div className="warnings">{err}</div>}
-    </div>
-  );
-}
 
 /** One request's Over pull and, once files are uploaded, the check against them. */
 export function OverLine({ req, token, onChanged }: { req: RequestDto; token: string; onChanged: (r: RequestDto) => void }) {
@@ -66,15 +42,22 @@ export function OverLine({ req, token, onChanged }: { req: RequestDto; token: st
     <div className="over-line small">
       {o.status === "running" && <span className="muted">{O.running}</span>}
       {o.status === "failed" && <span className="warnings">{O.failed(d?.error ?? "")}</span>}
-      {o.status === "done" && d && <span>{O.done(d.rows, d.blocks.length, o.through)}{excluded ? ` ${O.excluded(excluded)}` : ""}</span>}
+      {o.status === "done" && d && (
+        <span>
+          {O.done(d.rows, d.blocks.length, o.through)} {O.sources(d.govmapRows ?? 0, d.taxRows ?? 0)}{excluded ? ` ${O.excluded(excluded)}` : ""}
+          {d.blind?.length > 0 && <div className="warnings">{O.blind(d.blind.join(", "))}</div>}
+          {d.taxMissing?.length > 0 && <div className="muted">{O.taxMissing(d.taxMissing.join(", "))}</div>}
+        </span>
+      )}
       {o.status !== "running" && <button className="ghost" disabled={busy} onClick={again}>{O.pullAgain}</button>}
       {o.status === "done" && (
         <details onToggle={(e) => { if ((e.target as HTMLDetailsElement).open && cmp === undefined) overCompare(token, req.id).then(setCmp).catch((x) => setErr((x as Error).message)); }}>
           <summary>{O.compare}</summary>
-          {cmp === null || (cmp && !cmp.matched && !cmp.missing.length && !cmp.merged.length && !cmp.newer.length) ? <div className="muted">{O.nothing}</div> : cmp && (
+          {cmp === null || (cmp && !cmp.matched && !cmp.missing.length && !cmp.missingTaxCopy?.length && !cmp.merged.length && !cmp.newer.length) ? <div className="muted">{O.nothing}</div> : cmp && (
             <div>
               <div>{O.matched(cmp.matched)}</div>
               {cmp.missing.length > 0 && <div className="warnings"><b>{O.missing(cmp.missing.length)}</b>{rows(cmp.missing)}</div>}
+              {cmp.missingTaxCopy?.length > 0 && <div><b>{O.missingTaxCopy(cmp.missingTaxCopy.length)}</b>{rows(cmp.missingTaxCopy)}</div>}
               {cmp.merged.length > 0 && <div className="warnings"><b>{O.merged(cmp.merged.length)}</b>{rows(cmp.merged, true)}</div>}
               {cmp.newer.length > 0 && <div><b>{O.newer(cmp.newer.length)}</b>{rows(cmp.newer)}</div>}
             </div>
@@ -163,7 +146,6 @@ export function RequestsInbox({ onOpen, session = false, onlyRequest, onUploaded
       {!onlyRequest && <section className="card">
         <h2>{R.inbox}</h2>
         <p className="muted">{R.howTo} <a href={TAX_SITE} target="_blank" rel="noreferrer">{R.openSite}</a></p>
-        {(session || list) && <OverPanel token={token} />}
         {!session && <div className="inbox-login">
           <label className="field">
             <span>{R.token}</span>

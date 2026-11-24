@@ -36,10 +36,6 @@
  *   POST /api/requests/:id/items/:itemId/upload   Tax Authority export for one search    [admin]
  *   GET  /api/requests/:id/over-compare   uploaded rows vs Over: missing / merged / newer  [admin]
  *   POST /api/requests/:id/over    pull Over again for a request                            [admin]
- *   GET  /api/over/status          Over connection                                          [admin]
- *   POST /api/over/connect         → { url } to sign in to Over (Google) once               [admin]
- *   POST /api/over/disconnect      forget Over's tokens                                     [admin]
- *   GET  /api/over/callback        Over's sign-in redirect (state-checked)
  *   POST /api/tax/import           Tax Authority export without a request                 [admin]
  *   POST /api/deals/import         CSV or { source, rows } of completed deals              [admin]
  *   POST /api/listings/import      ImportRequest (licensed feeds)      → ImportResult      [admin]
@@ -50,7 +46,6 @@
  * Admin routes need `Authorization: Bearer $ADMIN_TOKEN`. Set SCHEDULER=1 to run the jobs.
  */
 import { existsSync } from "node:fs";
-import { disconnectOver, finishOverSignIn, overConnected, startOverSignIn } from "./connectors/over";
 import { compareWithOver, pullOverForRequest } from "./overDeals";
 import type { Subject } from "../src/engine/types";
 import { valuate, type ValuationFacts } from "../src/engine/valuation";
@@ -127,23 +122,30 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
     (!!adminToken && req.headers.get("authorization") === `Bearer ${adminToken}`) || isAdminUser(sessionUser(db, req));
   const cityByName = (name: string) => cfg.cities.find((c) => c.name === name);
   const overFetch = { proxy: process.env.OVER_PROXY || undefined };
+  /** Over's public API needs no sign-in; OVER_ENABLED=0 turns the pulls off. */
+  const overOn = () => process.env.OVER_ENABLED !== "0";
   /** Pull Over for a request in the background; the inbox shows its progress. */
+  // One pull at a time: Over asks for no bursts of parallel calls.
+  let overQueue: Promise<unknown> = Promise.resolve();
   const pullOver = (requestId: string) => {
-    if (!overConnected(db).connected) return;
-    pullOverForRequest(db, requestId, { fetch: overFetch, parcelLayer: cfg.layers.parcels })
+    if (!overOn()) return;
+    overQueue = overQueue.then(() => pullOverForRequest(db, requestId, { fetch: overFetch, parcelLayer: cfg.layers.parcels })
       .then((d) => {
         reconcileRequest(db, requestId);
         resetMarketCache();
         if (d.error) console.log("[over] pull failed", requestId, d.error);
       })
-      .catch((e) => console.log("[over] pull failed", requestId, (e as Error).message));
+      .catch((e) => console.log("[over] pull failed", requestId, (e as Error).message)));
   };
-  /** Where Over sends the admin back after signing in. */
-  const overRedirect = (req: Request) => {
-    const base = process.env.PUBLIC_URL
-      ?? `${req.headers.get("x-forwarded-proto") ?? new URL(req.url).protocol.replace(":", "")}://${req.headers.get("x-forwarded-host") ?? req.headers.get("host")}`;
-    return `${base.replace(/\/$/, "")}/api/over/callback`;
-  };
+  // With the scheduler on, open requests never pulled from Over (e.g. from before) are pulled once.
+  if (process.env.SCHEDULER === "1" && overOn()) {
+    setTimeout(() => {
+      try {
+        ensureRequestTables(db);
+        for (const r of db.query(`SELECT id FROM requests WHERE status = 'preliminary' AND over_status IS NULL`).all() as { id: string }[]) pullOver(r.id);
+      } catch (e) { console.log("[over] start-up pull skipped", (e as Error).message); }
+    }, 10_000);
+  }
 
   const server = Bun.serve({
     port: opts.port ?? Number(process.env.PORT ?? 8787),
@@ -406,20 +408,6 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           pullOver(created.id);
           return json(created);
         }
-        // Over's sign-in comes back here; the one-time state is the check.
-        if (url.pathname === "/api/over/callback" && req.method === "GET") {
-          const code = url.searchParams.get("code"), state = url.searchParams.get("state");
-          const page = (msg: string, status = 200) =>
-            new Response(`<!doctype html><meta charset="utf-8"><title>Over</title><body style="font-family:sans-serif;padding:2em"><p>${msg}</p><p><a href="/">Back to Beit Shamai</a></p>`, { status, headers: { "content-type": "text/html; charset=utf-8" } });
-          if (!code || !state) return page(`Over sign-in did not finish${url.searchParams.get("error") ? ` (${Bun.escapeHTML(url.searchParams.get("error")!)})` : ""}.`, 400);
-          try {
-            await finishOverSignIn(db, code, state, overFetch);
-            for (const r of db.query(`SELECT id FROM requests WHERE status = 'preliminary' AND over_status IS NULL`).all() as { id: string }[]) pullOver(r.id);
-            return page("Over is connected. Open requests are being pulled from Over now.");
-          } catch (e) {
-            return page(`Over sign-in failed: ${Bun.escapeHTML((e as Error).message)}`, 400);
-          }
-        }
         const reqRoute = url.pathname.match(/^\/api\/requests\/([0-9a-f-]{36})$/);
         if (reqRoute && req.method === "GET") {
           const r = getRequest(db, reqRoute[1]!, true);
@@ -428,12 +416,9 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
 
         if (url.pathname.startsWith("/api/") && !isAdmin(req)) return json({ error: "unauthorised" }, 401);
 
-        if (url.pathname === "/api/over/status" && req.method === "GET") return json(overConnected(db));
-        if (url.pathname === "/api/over/connect" && req.method === "POST") return json(await startOverSignIn(db, overRedirect(req), overFetch));
-        if (url.pathname === "/api/over/disconnect" && req.method === "POST") { disconnectOver(db); return json({ connected: false }); }
         const overReq = url.pathname.match(/^\/api\/requests\/([0-9a-f-]{36})\/(over|over-compare)$/);
         if (overReq && overReq[2] === "over" && req.method === "POST") {
-          if (!overConnected(db).connected) return json({ error: "Over is not connected" }, 409);
+          if (!overOn()) return json({ error: "Over is turned off (OVER_ENABLED=0)" }, 409);
           const d = await pullOverForRequest(db, overReq[1]!, { fetch: overFetch, parcelLayer: cfg.layers.parcels });
           reconcileRequest(db, overReq[1]!);
           resetMarketCache();
