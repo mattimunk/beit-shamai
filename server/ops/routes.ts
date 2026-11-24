@@ -18,6 +18,8 @@ export interface OpsCtx {
   provider: DataProvider;
   isAdmin: (req: Request) => boolean;
   canAccess: (caseId: string) => boolean;
+  /** Give an active property a data request and an Over pull, if it has none. */
+  ensureCaseRequest?: (caseId: string) => void;
 }
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
@@ -151,6 +153,7 @@ export async function handleOps(req: Request, url: URL, ctx: OpsCtx): Promise<Re
   if (p === "/api/admin/properties" && req.method === "GET") return json(propertyRows(db));
   r = m(`/api/admin/properties/(${ID})`);
   if (r && req.method === "GET") {
+    ctx.ensureCaseRequest?.(r[1]!);
     syncCaseTasks(db, r[1]!);
     const w = workbench(db, r[1]!);
     return w ? json(w) : json({ error: "not found" }, 404);

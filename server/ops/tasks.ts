@@ -213,12 +213,14 @@ export function wantedTasks(st: CaseState): Want[] {
   if (!a.city || !a.street) out.push({ key: "address", party: "user", category: "application", priority: 2, dueDays: 3 });
   if (d && !isKnown(d.size.interior)) out.push({ key: "size", party: "user", category: "application", priority: 2, dueDays: 3 });
 
-  // Market data: manual Tax Authority searches are a normal step of every property.
+  // Market data. Before a full appraisal, Over's sales are enough: Tax Authority uploads are asked
+  // for only when there are too few sales nearby. For a full appraisal the searches Over doesn't
+  // cover (the recent months) must be uploaded, and stale city data needs a check.
   const m = st.market;
   if (a.city) {
     const weak = m.level === "none" || m.level === "insufficient";
     const stale = m.city?.freshness === "outdated" || m.city?.freshness === "none";
-    if (m.pendingSearches > 0 || weak || stale)
+    if (weak || (full && (m.pendingSearches > 0 || stale)))
       out.push({ key: "tax_data", party: "admin", category: "market", priority: full ? 1 : 2, dueDays: 2,
         data: { pending: m.pendingSearches, nearby: m.nearby, level: m.level, freshness: m.city?.freshness, requestId: m.requestId } });
     else if (m.city?.freshness === "review")

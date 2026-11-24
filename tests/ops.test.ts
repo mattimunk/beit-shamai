@@ -16,6 +16,7 @@ const DAY = 86_400_000;
 
 describe("admin workflow journeys", () => {
   process.env.ADMIN_EMAILS = "boss@example.com";
+  process.env.OVER_ENABLED = "0"; // no calls to over.org.il from tests
   delete process.env.RESEND_API_KEY;
   delete process.env.BREVO_API_KEY;
   const { server, db } = createServer({ dbPath: ":memory:", adminToken: "t0k3n-long-enough", port: 0, opsTick: false });
@@ -136,6 +137,13 @@ describe("admin workflow journeys", () => {
     expect(w.market.city.freshness).toBe("fresh");
     expect(w.market.city.checkedBy).toBe("tax_upload");
     expect(w.tasks.find((t: any) => t.key === "tax_data").status).toBe("done");
+  });
+
+  test("6b. before a full appraisal, enough nearby sales (e.g. from Over) mean no upload task, even with searches left", () => {
+    const item = db.query(`SELECT id FROM plan_items LIMIT 1`).get() as { id: string };
+    db.query(`UPDATE plan_items SET status = 'pending' WHERE id = ?`).run(item.id);
+    expect(syncCaseTasks(db, caseId).some((t) => t.key === "tax_data")).toBe(false);
+    db.query(`UPDATE plan_items SET status = 'done' WHERE id = ?`).run(item.id);
   });
 
   test("7. ready → admin starts review → preliminary appraisal generated for approval", async () => {
