@@ -260,6 +260,8 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           ensureRequestTables(db);
           const existing = db.query(`SELECT id FROM requests WHERE case_id = ? LIMIT 1`).get(c.id) as { id: string } | null;
           const request = existing ? getRequest(db, existing.id, true) : c.subject.address.city ? createRequest(db, c.subject, undefined, c.id) : null;
+          // Pull Over for it (new request, or one never pulled).
+          if (request && (!existing || !request.over)) pullOver(request.id);
           const addr = [c.subject.address.street, c.subject.address.number].filter(Boolean).join(" ") + (c.subject.address.city ? `, ${c.subject.address.city}` : "");
           for (const to of adminEmails()) {
             sendMail({ to, subject: `נכס חדש הוגש: ${addr}`, text: `נכס חדש הוגש לבדיקה.\n\nכתובת: ${addr}\nמגיש: ${u.name ?? ""} <${u.email}> (${u.role ?? "—"})\n\nהיכנסו לאזור הניהול כדי לטפל.` }).catch(() => {});

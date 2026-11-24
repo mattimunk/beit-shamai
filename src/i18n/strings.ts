@@ -365,6 +365,8 @@ const he = {
       taxMissing: (blocks: string) => `ב-GovMap יש עסקאות שאין בעותק רשות המסים, בגושים: ${blocks}.`,
       missingTaxCopy: (n: number) => `${n} עסקאות בקבצים נמצאות ב-GovMap אבל חסרות בעותק רשות המסים של Over`,
       pullAgain: "משיכה מחדש",
+      never: "Over: עוד לא נמשכו עסקאות להזמנה הזו.",
+      pull: "משיכה מ-Over",
       compare: "בדיקה מול הקבצים שהועלו",
       matched: (n: number) => `${n} עסקאות זהות בשני המקורות.`,
       missing: (n: number) => `${n} עסקאות בקבצים חסרות בשני המקורות של Over`,
@@ -759,6 +761,8 @@ const en: Strings = {
       title: "Over (over.org.il)",
       help: "Open copies of completed sales (GovMap's deals layer and the Tax Authority register). Pulled automatically for every order, no sign-in.",
       running: "Pulling deals from Over…",
+      never: "Over: no deals pulled for this request yet.",
+      pull: "Pull from Over",
       failed: (e: string) => `Pulling from Over failed: ${e}`,
       done: (rows: number, blocks: number, through?: string) =>
         `Over: ${rows} residential deals in ${blocks} blocks${through ? `; covers up to ${through.split("-").reverse().join("/")}` : ""}.`,
