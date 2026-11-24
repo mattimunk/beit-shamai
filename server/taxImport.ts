@@ -5,7 +5,7 @@
  */
 import type { Database } from "bun:sqlite";
 import type { Deal } from "../src/engine/types";
-import { upsertDeals } from "./db";
+import { dropOverCopies, upsertDeals } from "./db";
 import { parseTaxExport, type TaxCriteria, type TaxRow } from "./connectors/taxExport";
 import { locateParcel, type ParcelLayer } from "./connectors/parcels";
 
@@ -19,10 +19,32 @@ export function ensureTaxTables(db: Database) {
   `);
 }
 
-export function rowToDeal(row: TaxRow, loc: { lat: number; lng: number; approx: boolean }): Deal {
+/**
+ * One sale's id, shared by every source of Tax Authority rows (uploaded exports and Over), so the
+ * same sale is stored once. Identical rows in one file are separate sales (e.g. 8 heirs each
+ * selling 11.1% on the same day for the same amount): the 2nd, 3rd … get "#2", "#3" ….
+ */
+export function dealKey(r: { block: string; parcel: string; subParcel?: string; date: string; amount?: number }, occurrence = 1): string {
+  return `tax-${r.block}-${r.parcel}-${r.subParcel ?? ""}-${r.date}-${r.amount}${occurrence > 1 ? `#${occurrence}` : ""}`;
+}
+
+/** Occurrence numbers (1, 2, …) for rows with the same key, in file order. */
+export function occurrences<T>(rows: T[], keyOf: (r: T) => string): number[] {
+  const seen = new Map<string, number>();
+  return rows.map((r) => {
+    const k = keyOf(r);
+    const n = (seen.get(k) ?? 0) + 1;
+    seen.set(k, n);
+    return n;
+  });
+}
+
+const taxAmount = (row: TaxRow) => row.saleValue ?? row.declared;
+
+export function rowToDeal(row: TaxRow, loc: { lat: number; lng: number; approx: boolean }, occurrence = 1): Deal {
   const year = Number(row.date.slice(0, 4));
   return {
-    id: `tax-${row.block}-${row.parcel}-${row.subParcel ?? ""}-${row.date}-${row.saleValue ?? row.declared}`,
+    id: dealKey({ ...row, amount: taxAmount(row) }, occurrence),
     evidence: "completed_deal",
     source: loc.approx ? "tax_authority_export (block centre)" : "tax_authority_export",
     date: row.date,
@@ -62,22 +84,24 @@ export async function importTaxExport(
 ): Promise<TaxImportResult> {
   ensureTaxTables(db);
   const exp = parseTaxExport(text);
-  if (!exp.rows.length && !exp.totalReported) throw new Error("not a Tax Authority export, or no rows found");
+  if (!exp.rows.length && exp.totalReported === undefined) throw new Error("not a Tax Authority export, or no rows found");
   const deals: Deal[] = [];
   let unlocated = 0, approx = 0;
   const insUnloc = db.prepare(`INSERT OR REPLACE INTO unlocated_deals (id, row, at) VALUES (?, ?, ?)`);
-  for (const row of exp.rows) {
+  const occ = occurrences(exp.rows, (r) => dealKey({ ...r, amount: taxAmount(r) }));
+  for (const [i, row] of exp.rows.entries()) {
     let loc = null;
     try { loc = await locateParcel(db, parcelLayer, row.block, row.parcel, fetchImpl); } catch { loc = null; }
     if (!loc) {
-      insUnloc.run(`${row.block}-${row.parcel}-${row.subParcel ?? ""}-${row.date}-${row.saleValue}`, JSON.stringify(row), new Date().toISOString());
+      insUnloc.run(dealKey({ ...row, amount: taxAmount(row) }, occ[i]), JSON.stringify({ ...row, occurrence: occ[i] }), new Date().toISOString());
       unlocated++;
       continue;
     }
     if (loc.approx) approx++;
-    deals.push(rowToDeal(row, loc));
+    deals.push(rowToDeal(row, loc, occ[i]));
   }
   upsertDeals(db, deals);
+  dropOverCopies(db, deals); // an upload replaces Over's copies of the same sales
   const pullId = crypto.randomUUID();
   const c = exp.criteria;
   db.query(
@@ -105,10 +129,12 @@ export async function relocateUnlocated(db: Database, layer: ParcelLayer | undef
   const rows = db.query(`SELECT id, row FROM unlocated_deals`).all() as { id: string; row: string }[];
   let placed = 0;
   for (const r of rows) {
-    const row = JSON.parse(r.row) as TaxRow;
+    const row = JSON.parse(r.row) as TaxRow & { occurrence?: number };
     const loc = await locateParcel(db, layer, row.block, row.parcel, fetchImpl).catch(() => null);
     if (!loc) continue;
-    upsertDeals(db, [rowToDeal(row, loc)]);
+    const d = rowToDeal(row, loc, row.occurrence ?? 1);
+    upsertDeals(db, [d]);
+    dropOverCopies(db, [d]);
     db.query(`DELETE FROM unlocated_deals WHERE id = ?`).run(r.id);
     placed++;
   }

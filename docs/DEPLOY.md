@@ -66,6 +66,12 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: text/csv" \
 
 Columns, in Hebrew or English: תאריך עסקה (date), מחיר (price), ישוב (city), רחוב (street), מספר בית (number), גוש/חלקה/תת חלקה (block/parcel/sub-parcel), שטח (area), חדרים (rooms), קומה (floor), קומות בבניין, שנת בנייה. Missing coordinates are looked up automatically. Then run the matching job for the city.
 
+## Over (nothing to set up)
+
+Over (over.org.il) gives each report an early set of completed sales and shrinks the searches to upload (see docs/DATA_SOURCES.md). Its REST API is public: no sign-in, no key. Every new request is pulled automatically, one at a time; with `SCHEDULER=1`, open requests never pulled before are pulled once at start-up.
+
+Optional settings in `.env`: `OVER_ENABLED=0` (turn the pulls off), `OVER_RADIUS_M` (default 1000), `OVER_MARGIN_DAYS` (default 30), `OVER_CACHE_DAYS` (default 7), `OVER_GAP_MS` (pause between calls, default 250), `OVER_GAP_BLOCKS` (blocks Over is known to miss; default: central Jerusalem, from Over's data log), `OVER_API_URL`, `OVER_PROXY`.
+
 ## 4. Choose the cities
 
 Edit `config/sources.json` (`nano config/sources.json`). Each city needs its name as written in Tax Authority records, a centre point, a radius and its CBS district:

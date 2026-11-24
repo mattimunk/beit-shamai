@@ -34,6 +34,8 @@
  *   GET  /api/requests/:id         request status (preliminary / final) and plan
  *   GET  /api/requests             open requests (inbox)                                   [admin]
  *   POST /api/requests/:id/items/:itemId/upload   Tax Authority export for one search    [admin]
+ *   GET  /api/requests/:id/over-compare   uploaded rows vs Over: missing / merged / newer  [admin]
+ *   POST /api/requests/:id/over    pull Over again for a request                            [admin]
  *   POST /api/tax/import           Tax Authority export without a request                 [admin]
  *   POST /api/deals/import         CSV or { source, rows } of completed deals              [admin]
  *   POST /api/listings/import      ImportRequest (licensed feeds)      → ImportResult      [admin]
@@ -44,6 +46,7 @@
  * Admin routes need `Authorization: Bearer $ADMIN_TOKEN`. Set SCHEDULER=1 to run the jobs.
  */
 import { existsSync } from "node:fs";
+import { compareWithOver, pullOverForRequest } from "./overDeals";
 import type { Subject } from "../src/engine/types";
 import { valuate, type ValuationFacts } from "../src/engine/valuation";
 import { lastRun, openDb, pairsNear } from "./db";
@@ -67,7 +70,7 @@ import { sendMail } from "./mailer";
 import { MAX_CAPTURE_BYTES, framePath, getLayout, listCaptures, saveLayout, storeCapture, type Layout } from "./capture";
 import { importDeals, parseCsv } from "./dealsImport";
 import { importTaxExport, relocateUnlocated } from "./taxImport";
-import { createRequest, ensureRequestTables, getRequest, listRequests, reconcileAll, uploadToItem } from "./requests";
+import { createRequest, ensureRequestTables, getRequest, listRequests, reconcileAll, reconcileRequest, uploadToItem } from "./requests";
 
 /** An upload is either multipart (field "file") or the raw file as the body. */
 async function readUploadText(req: Request): Promise<string> {
@@ -118,6 +121,31 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
   const isAdmin = (req: Request) =>
     (!!adminToken && req.headers.get("authorization") === `Bearer ${adminToken}`) || isAdminUser(sessionUser(db, req));
   const cityByName = (name: string) => cfg.cities.find((c) => c.name === name);
+  const overFetch = { proxy: process.env.OVER_PROXY || undefined };
+  /** Over's public API needs no sign-in; OVER_ENABLED=0 turns the pulls off. */
+  const overOn = () => process.env.OVER_ENABLED !== "0";
+  /** Pull Over for a request in the background; the inbox shows its progress. */
+  // One pull at a time: Over asks for no bursts of parallel calls.
+  let overQueue: Promise<unknown> = Promise.resolve();
+  const pullOver = (requestId: string) => {
+    if (!overOn()) return;
+    overQueue = overQueue.then(() => pullOverForRequest(db, requestId, { fetch: overFetch, parcelLayer: cfg.layers.parcels })
+      .then((d) => {
+        reconcileRequest(db, requestId);
+        resetMarketCache();
+        if (d.error) console.log("[over] pull failed", requestId, d.error);
+      })
+      .catch((e) => console.log("[over] pull failed", requestId, (e as Error).message)));
+  };
+  // With the scheduler on, open requests never pulled from Over (e.g. from before) are pulled once.
+  if (process.env.SCHEDULER === "1" && overOn()) {
+    setTimeout(() => {
+      try {
+        ensureRequestTables(db);
+        for (const r of db.query(`SELECT id FROM requests WHERE status = 'preliminary' AND over_status IS NULL`).all() as { id: string }[]) pullOver(r.id);
+      } catch (e) { console.log("[over] start-up pull skipped", (e as Error).message); }
+    }, 10_000);
+  }
 
   const server = Bun.serve({
     port: opts.port ?? Number(process.env.PORT ?? 8787),
@@ -376,7 +404,9 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           const b = (await req.json()) as { subject: Subject; caseId?: string };
           if (!b?.subject?.address?.city) return json({ error: "subject with city required" }, 400);
           const caseId = b.caseId && /^[A-Za-z0-9-]{16,64}$/.test(b.caseId) ? b.caseId : undefined;
-          return json(createRequest(db, b.subject, undefined, caseId));
+          const created = createRequest(db, b.subject, undefined, caseId);
+          pullOver(created.id);
+          return json(created);
         }
         const reqRoute = url.pathname.match(/^\/api\/requests\/([0-9a-f-]{36})$/);
         if (reqRoute && req.method === "GET") {
@@ -386,6 +416,15 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
 
         if (url.pathname.startsWith("/api/") && !isAdmin(req)) return json({ error: "unauthorised" }, 401);
 
+        const overReq = url.pathname.match(/^\/api\/requests\/([0-9a-f-]{36})\/(over|over-compare)$/);
+        if (overReq && overReq[2] === "over" && req.method === "POST") {
+          if (!overOn()) return json({ error: "Over is turned off (OVER_ENABLED=0)" }, 409);
+          const d = await pullOverForRequest(db, overReq[1]!, { fetch: overFetch, parcelLayer: cfg.layers.parcels });
+          reconcileRequest(db, overReq[1]!);
+          resetMarketCache();
+          return json({ detail: d, request: getRequest(db, overReq[1]!) });
+        }
+        if (overReq && overReq[2] === "over-compare" && req.method === "GET") return json(compareWithOver(db, overReq[1]!));
         if (url.pathname === "/api/requests" && req.method === "GET") {
           return json(listRequests(db, url.searchParams.get("all") !== "1"));
         }

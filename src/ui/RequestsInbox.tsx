@@ -1,9 +1,73 @@
 import { useEffect, useState } from "react";
-import { listDataRequests, requestProgress, uploadTaxExport, uploadTaxExportAny, type PlanItemDto, type RequestDto } from "../data/apiClient";
+import {
+  listDataRequests, overCompare, overPull, requestProgress, uploadTaxExport, uploadTaxExportAny,
+  type OverCompareDto, type OverCompareRow, type PlanItemDto, type RequestDto,
+} from "../data/apiClient";
 import { useT } from "./context";
 
 export const TAX_SITE = "https://nadlan.taxes.gov.il/svinfonadlan2010/";
 const dmy = (iso: string) => iso.split("-").reverse().join("/");
+const nis = (n: number) => `₪${Math.round(n).toLocaleString("en")}`;
+
+/** One request's Over pull and, once files are uploaded, the check against them. */
+export function OverLine({ req, token, onChanged }: { req: RequestDto; token: string; onChanged: (r: RequestDto) => void }) {
+  const { t } = useT();
+  const O = t.req.over;
+  const [cmp, setCmp] = useState<OverCompareDto | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const o = req.over;
+  // While Over is being pulled, look again every few seconds.
+  useEffect(() => {
+    if (o?.status !== "running") return;
+    const h = setTimeout(() => listDataRequests(token, true).then((l) => { const r = l.find((x) => x.id === req.id); if (r) onChanged(r); }).catch(() => {}), 4000);
+    return () => clearTimeout(h);
+  }, [o?.status, req.id]);
+  if (!o) return null;
+  const d = o.detail;
+  const excluded = d ? Object.values(d.excluded).reduce((a, b) => a + b, 0) : 0;
+  const again = async () => {
+    setBusy(true); setErr(null);
+    try { onChanged((await overPull(token, req.id)).request); } catch (e) { setErr((e as Error).message); }
+    setBusy(false);
+  };
+  const rows = (list: OverCompareRow[], copies = false) => (
+    <ul className="small">
+      {list.map((x) => (
+        <li key={x.id}><bdi>{dmy(x.date)} · {nis(x.price)} · {x.parcel}{x.rooms ? ` · ${x.rooms} ${O.rooms}` : ""}{x.area ? ` · ${x.area} ${O.sqm}` : ""}{x.fraction !== undefined && x.fraction < 0.999 ? ` · ${Math.round(x.fraction * 1000) / 10}%` : ""}</bdi>{copies && x.copies ? ` – ${O.copies(x.copies)}` : ""}</li>
+      ))}
+    </ul>
+  );
+  return (
+    <div className="over-line small">
+      {o.status === "running" && <span className="muted">{O.running}</span>}
+      {o.status === "failed" && <span className="warnings">{O.failed(d?.error ?? "")}</span>}
+      {o.status === "done" && d && (
+        <span>
+          {O.done(d.rows, d.blocks.length, o.through)} {O.sources(d.govmapRows ?? 0, d.taxRows ?? 0)}{excluded ? ` ${O.excluded(excluded)}` : ""}
+          {d.blind?.length > 0 && <div className="warnings">{O.blind(d.blind.join(", "))}</div>}
+          {d.taxMissing?.length > 0 && <div className="muted">{O.taxMissing(d.taxMissing.join(", "))}</div>}
+        </span>
+      )}
+      {o.status !== "running" && <button className="ghost" disabled={busy} onClick={again}>{O.pullAgain}</button>}
+      {o.status === "done" && (
+        <details onToggle={(e) => { if ((e.target as HTMLDetailsElement).open && cmp === undefined) overCompare(token, req.id).then(setCmp).catch((x) => setErr((x as Error).message)); }}>
+          <summary>{O.compare}</summary>
+          {cmp === null || (cmp && !cmp.matched && !cmp.missing.length && !cmp.missingTaxCopy?.length && !cmp.merged.length && !cmp.newer.length) ? <div className="muted">{O.nothing}</div> : cmp && (
+            <div>
+              <div>{O.matched(cmp.matched)}</div>
+              {cmp.missing.length > 0 && <div className="warnings"><b>{O.missing(cmp.missing.length)}</b>{rows(cmp.missing)}</div>}
+              {cmp.missingTaxCopy?.length > 0 && <div><b>{O.missingTaxCopy(cmp.missingTaxCopy.length)}</b>{rows(cmp.missingTaxCopy)}</div>}
+              {cmp.merged.length > 0 && <div className="warnings"><b>{O.merged(cmp.merged.length)}</b>{rows(cmp.merged, true)}</div>}
+              {cmp.newer.length > 0 && <div><b>{O.newer(cmp.newer.length)}</b>{rows(cmp.newer)}</div>}
+            </div>
+          )}
+        </details>
+      )}
+      {err && <div className="warnings">{err}</div>}
+    </div>
+  );
+}
 
 function readToken(): string {
   try { return sessionStorage.getItem("bs-admin") ?? ""; } catch { return ""; }
@@ -123,6 +187,7 @@ export function RequestsInbox({ onOpen, session = false, onlyRequest, onUploaded
               <span className="muted small">{R.progress(p.done, p.total)} · {req.createdAt.slice(0, 16).replace("T", " ")}</span>
               {onOpen && <button className="ghost open-report" onClick={() => onOpen(req)}>{R.openReport}</button>}
             </header>
+            <OverLine req={req} token={token} onChanged={(r) => setList((l) => (l ?? []).map((x) => (x.id === r.id ? r : x)))} />
             <details open={req.status !== "final"}>
             <summary className="small muted">{R.searches(req.items.length)}</summary>
             <table className="plan">
@@ -138,7 +203,7 @@ export function RequestsInbox({ onOpen, session = false, onlyRequest, onUploaded
                     <td><bdi>{it.areaFrom} – {it.areaTo}</bdi></td>
                     <td>{R.status[it.status]}{(notes[it.id] ?? it.note) && <div className="small muted">{notes[it.id] ?? noteText(it.note)}</div>}</td>
                     <td className="actions">
-                      {it.status === "pending" && (
+                      {(it.status === "pending" || it.status === "over") && (
                         <>
                           <button className="ghost" onClick={() => copy(it)}>{copied === it.id ? R.copied : R.copy}</button>
                           <label className="button primary">
