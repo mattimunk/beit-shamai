@@ -12,7 +12,7 @@
 import type { Database } from "bun:sqlite";
 import type { Subject } from "../src/engine/types";
 import { normaliseCity } from "../src/engine/address";
-import { ensureTaxTables, importTaxExport, type TaxImportResult } from "./taxImport";
+import { ensureTaxTables, importTaxExport, narrowOf, type TaxImportResult } from "./taxImport";
 import { normaliseTaxCity, parseTaxExport } from "./connectors/taxExport";
 import type { ParcelLayer } from "./connectors/parcels";
 import { ensureOverDealTables, type OverPullDetail } from "./overDeals";
@@ -93,7 +93,7 @@ export function areaBand(area: number): [number, number] {
 export function coveringPull(db: Database, it: Pick<PlanItem, "city" | "from" | "to" | "areaFrom" | "areaTo">): string | null {
   ensureTaxTables(db);
   const city = normaliseCity(normaliseTaxCity(it.city));
-  const pulls = (db.query(`SELECT id, city, date_from, date_to, area_from, area_to FROM tax_pulls WHERE truncated = 0`).all() as any[])
+  const pulls = (db.query(`SELECT id, city, date_from, date_to, area_from, area_to FROM tax_pulls WHERE truncated = 0 AND COALESCE(narrow, '') = ''`).all() as any[])
     .filter((p) => p.city && p.date_from && p.date_to && normaliseCity(normaliseTaxCity(p.city)) === city)
     .map((p) => ({ id: p.id as string, from: p.date_from as string, to: p.date_to as string, aFrom: p.area_from ?? 0, aTo: p.area_to ?? Infinity }));
   const recent = Date.parse(it.to) >= Date.now() - 2 * DAY;
@@ -125,7 +125,7 @@ interface PullSpan { id: string; from: number; to: number; aFrom: number; aTo: n
 function cityPulls(db: Database, city: string): PullSpan[] {
   ensureTaxTables(db);
   const c = normaliseCity(normaliseTaxCity(city));
-  return (db.query(`SELECT id, city, date_from, date_to, area_from, area_to FROM tax_pulls WHERE truncated = 0`).all() as any[])
+  return (db.query(`SELECT id, city, date_from, date_to, area_from, area_to FROM tax_pulls WHERE truncated = 0 AND COALESCE(narrow, '') = ''`).all() as any[])
     .filter((p) => p.city && p.date_from && p.date_to && normaliseCity(normaliseTaxCity(p.city)) === c)
     .map((p) => ({ id: p.id, from: Date.parse(p.date_from) / DAY, to: Date.parse(p.date_to) / DAY, aFrom: p.area_from ?? 0, aTo: p.area_to ?? Infinity }));
 }
@@ -162,8 +162,15 @@ const dayIso = (d: number) => iso(Math.round(d) * DAY);
  * is replaced by its covered pieces and new searches for the remaining dates.
  */
 export function reconcileRequest(db: Database, requestId: string, todayDays = Date.now() / DAY) {
+  // Searches closed by an upload limited to a street, block or rooms open again (such an upload
+  // never covered the city-wide search; it was counted before narrow searches were recognised).
+  ensureTaxTables(db);
+  db.query(
+    `UPDATE plan_items SET status = 'pending', pull_id = NULL, note = 'narrow:' || (SELECT narrow FROM tax_pulls p WHERE p.id = plan_items.pull_id)
+     WHERE request_id = ? AND status IN ('done', 'covered') AND pull_id IN (SELECT id FROM tax_pulls WHERE COALESCE(narrow, '') <> '')`,
+  ).run(requestId);
   // Notes from before they became codes (free text) are dropped on open searches.
-  db.query(`UPDATE plan_items SET note = NULL WHERE request_id = ? AND status = 'pending' AND note LIKE '% %'`).run(requestId);
+  db.query(`UPDATE plan_items SET note = NULL WHERE request_id = ? AND status = 'pending' AND note LIKE '% %' AND note NOT LIKE 'narrow:%' AND note NOT LIKE 'city:%'`).run(requestId);
   // A few passes: an area split creates searches that the date check can then close.
   for (let pass = 0; pass < 4; pass++) {
     let changed = false;
@@ -374,6 +381,8 @@ export function criteriaMismatch(item: PlanItem, text: string): string[] {
   if (c.to && c.to < addDays(item.to, -3)) out.push(`ends ${c.to}, search needs ${item.to}`);
   if (c.areaFrom !== undefined && c.areaFrom > item.areaFrom + 1) out.push(`area from ${c.areaFrom} > ${item.areaFrom}`);
   if (c.areaTo !== undefined && c.areaTo < item.areaTo - 1) out.push(`area to ${c.areaTo} < ${item.areaTo}`);
+  const narrow = narrowOf(c);
+  if (narrow) out.push(`narrow ${narrow}`);
   return out;
 }
 
@@ -429,8 +438,12 @@ export async function uploadToItem(
   let status: ItemStatus = item.status;
   let note: string | undefined;
   const cityWrong = mismatch.some((m) => m.startsWith("city"));
+  const narrow = narrowOf(parseTaxExport(text).criteria);
   if (cityWrong) {
     note = `city:${parseTaxExport(text).criteria.city ?? ""}`;
+  } else if (narrow) {
+    // Limited to a street / block / rooms: its sales are kept, but the search stays open.
+    note = `narrow:${narrow}`;
   } else if (imp.truncated && !mismatch.length && item.status === "pending") {
     // This very search hit the limit: split it in two narrower ones.
     status = "truncated";
