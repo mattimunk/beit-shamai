@@ -17,6 +17,30 @@ export function ensureTaxTables(db: Database) {
     );
     CREATE TABLE IF NOT EXISTS unlocated_deals (id TEXT PRIMARY KEY, row TEXT, at TEXT);
   `);
+  try { db.exec(`ALTER TABLE tax_pulls ADD COLUMN narrow TEXT`); } catch { /* already there */ }
+  // Uploads from before the column: work it out from the stored search criteria.
+  const old = db.query(`SELECT id, criteria FROM tax_pulls WHERE narrow IS NULL`).all() as { id: string; criteria: string | null }[];
+  if (old.length) {
+    const set = db.prepare(`UPDATE tax_pulls SET narrow = ? WHERE id = ?`);
+    db.transaction(() => { for (const r of old) set.run(narrowOf(r.criteria ? JSON.parse(r.criteria) : {}), r.id); })();
+  }
+}
+
+/**
+ * Was the search narrower than a city-wide one: limited to a street, a block/parcel or a number
+ * of rooms? Such an upload keeps its sales but never counts as covering a planned search, which
+ * is city-wide (sales are placed on the map and filtered by distance afterwards).
+ * Returns "" for a city-wide search, else the reasons ("street:נחום ליפשיץ,rooms").
+ */
+export function narrowOf(c: { street?: string; block?: string; roomsFrom?: number; roomsTo?: number; raw?: Record<string, string> }): string {
+  const out: string[] = [];
+  const has = (v: unknown) => v !== undefined && v !== null && String(v).trim() !== "" && String(v).trim() !== "0";
+  if (has(c.street)) out.push(`street:${String(c.street).trim()}`);
+  if (has(c.block)) out.push(`block:${String(c.block).trim()}`);
+  const helka = c.raw && Object.entries(c.raw).find(([k]) => /^חלקה/.test(k))?.[1];
+  if (has(helka)) out.push(`parcel:${String(helka).trim()}`);
+  if (has(c.roomsFrom) || has(c.roomsTo)) out.push("rooms");
+  return out.join(",");
 }
 
 /**
@@ -105,10 +129,10 @@ export async function importTaxExport(
   const pullId = crypto.randomUUID();
   const c = exp.criteria;
   db.query(
-    `INSERT INTO tax_pulls (id, city, kind, date_from, date_to, area_from, area_to, total, rows, truncated, located, unlocated, item_id, at, criteria)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tax_pulls (id, city, kind, date_from, date_to, area_from, area_to, total, rows, truncated, located, unlocated, item_id, at, criteria, narrow)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(pullId, c.city ?? null, c.kind ?? null, c.from ?? null, c.to ?? null, c.areaFrom ?? null, c.areaTo ?? null,
-    exp.totalReported ?? null, exp.rows.length, exp.truncated ? 1 : 0, deals.length, unlocated, itemId ?? null, new Date().toISOString(), JSON.stringify(c));
+    exp.totalReported ?? null, exp.rows.length, exp.truncated ? 1 : 0, deals.length, unlocated, itemId ?? null, new Date().toISOString(), JSON.stringify(c), narrowOf(c));
   return {
     pullId,
     criteria: c,

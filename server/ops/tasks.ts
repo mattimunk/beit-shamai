@@ -16,6 +16,7 @@ import { buildShotList, ensureCaptureTables } from "../capture";
 import { CAPTURE_LINK_HOURS, ensureCaseTables, getCase, newCaptureLink, type CaseRecord } from "../cases";
 import { normaliseTaxCity } from "../connectors/taxExport";
 import { lastRun } from "../db";
+import { ensureTaxTables } from "../taxImport";
 import { enqueue, stepUrl, type ReminderItem } from "./mail";
 import { ensureOpsTables, getSettings, logEvent, type OpsSettings } from "./store";
 
@@ -73,7 +74,8 @@ export function cityMarket(db: Database, city: string, s: OpsSettings, now = Dat
 function computeCityMarket(db: Database, city: string, key: string, s: OpsSettings, now: number): CityMarket {
   let lastTax: string | undefined;
   try {
-    for (const p of db.query(`SELECT city, at FROM tax_pulls WHERE at IS NOT NULL`).all() as { city: string | null; at: string }[]) {
+    ensureTaxTables(db);
+    for (const p of db.query(`SELECT city, at FROM tax_pulls WHERE at IS NOT NULL AND COALESCE(narrow, '') = ''`).all() as { city: string | null; at: string }[]) {
       if (p.city && cityKey(p.city) === key && (!lastTax || p.at > lastTax)) lastTax = p.at;
     }
   } catch { /* no uploads yet */ }
