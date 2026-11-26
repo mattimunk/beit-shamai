@@ -44,7 +44,7 @@ export interface Dossier {
     floor: Maybe<number>; floors: Maybe<number>;
     type?: PropertyType;
     pin?: { lat: number; lng: number }; pinConfirmed?: boolean;
-    /** Block/parcel: suggested from the national parcel map, typed by the owner, or read from a document. */
+    /** Block/parcel: looked up from the address or map pin (Over; else the nearest parcel centre), typed by the owner, or read from a document. */
     parcel?: { block: string; parcel: string; sub?: string; source: "suggested" | "owner" | "document" };
     street_kind: Maybe<"main" | "quiet">;
     orientation: Maybe<Direction[]>;
@@ -221,7 +221,7 @@ export function toSubject(d: Dossier, base: Subject): Subject {
     ...base,
     address: { city: L.city ?? "", street: L.street ?? "", number: L.number ?? "", ...(L.neighbourhood ? { neighborhood: L.neighbourhood } : {}) } as Subject["address"],
     location: L.pin ?? base.location,
-    parcel: L.parcel ? { block: L.parcel.block, parcel: L.parcel.parcel, subParcel: L.parcel.sub } : base.parcel,
+    parcel: L.parcel ? { block: L.parcel.block, parcel: L.parcel.parcel, subParcel: L.parcel.sub, source: L.parcel.source } : base.parcel,
     rights: d.legal.rights === "leasehold" || d.legal.rights === "long_lease" ? "leasehold" : d.legal.rights === "ownership" ? "ownership" : base.rights,
     floor: asksFloor(d) ? num(L.floor, base.floor) : 0,
     floorsInBuilding: asksFloor(d) ? num(L.floors, base.floorsInBuilding) : Math.max(1, num(L.floors, 2)),

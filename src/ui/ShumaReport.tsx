@@ -86,6 +86,7 @@ export function ShumaReport({
     <table className="kv">
       <tbody>
         <tr><th>{T.identRows.block}</th><td>{s.parcel?.unsettled ? T.unsettled : s.parcel?.block ?? "—"}</td><th>{T.identRows.parcel}</th><td>{s.parcel?.parcel ?? "—"}</td><th>{T.identRows.sub}</th><td>{s.parcel?.subParcel ?? "—"}</td></tr>
+        {s.parcel?.source === "suggested" && <tr><td colSpan={6} className="small muted">{T.parcelFromAddress}</td></tr>}
         <tr><th>{T.identRows.address}</th><td colSpan={3}><bdi>{addr}</bdi></td><th>{T.identRows.floor}</th><td>{s.floor}</td></tr>
         <tr><th>{T.identRows.type}</th><td colSpan={3}>{T.propType}</td><th>{T.identRows.rights}</th><td>{rightsWord}</td></tr>
       </tbody>

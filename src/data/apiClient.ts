@@ -144,6 +144,15 @@ export async function parcelAt(lat: number, lng: number): Promise<{ block: numbe
   return r.json();
 }
 
+/** Block/parcel of an address: Over's lookup by address or map point; else the nearest parcel centre. */
+export async function parcelLookup(q: { city?: string; street?: string; number?: string; lat?: number; lng?: number }): Promise<{ block: string; parcel: string; source: "address" | "point" | "nearest" } | null> {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
+  const r = await fetch(`/api/parcel-lookup?${p}`);
+  if (!r.ok) return null;
+  return r.json();
+}
+
 // ---- Visit capture -------------------------------------------------------------------------
 
 export interface VisitLayout { bedrooms: number; bathrooms: number; toilets: number; balconies: number; garden: boolean; storage: boolean; parking: boolean; extra?: string[] }
