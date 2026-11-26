@@ -57,8 +57,17 @@ export function ensureCaseTables(db: Database) {
 export function saveCase(db: Database, id: string, subject: Subject, userId?: string, dossier?: Dossier): CaseRecord {
   ensureCaseTables(db);
   const now = new Date().toISOString();
-  const exists = db.query(`SELECT app_no FROM cases WHERE id = ?`).get(id) as { app_no: string | null } | null;
+  const exists = db.query(`SELECT app_no, subject, dossier FROM cases WHERE id = ?`).get(id) as { app_no: string | null; subject: string; dossier: string | null } | null;
   const appNo = exists?.app_no ?? nextAppNo(db);
+  // A block/parcel the server looked up from the address is kept when a browser that loaded the
+  // property before the lookup saves it without one. The owner's own entry always replaces it.
+  if (exists && !subject.parcel?.block) {
+    const before = JSON.parse(exists.subject) as Subject;
+    if (before.parcel?.block && before.parcel.source === "suggested" && !dossier?.location?.parcel) {
+      subject = { ...subject, parcel: before.parcel };
+      if (dossier) dossier = { ...dossier, location: { ...dossier.location, parcel: { block: before.parcel.block, parcel: before.parcel.parcel, source: "suggested" } } };
+    }
+  }
   db.query(
     `INSERT INTO cases (id, subject, created_at, updated_at, owner_id, status, dossier, app_no) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)
      ON CONFLICT(id) DO UPDATE SET subject = excluded.subject, updated_at = excluded.updated_at,

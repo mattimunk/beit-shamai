@@ -8,6 +8,7 @@
  *   GET  /api/cases/:caseId/documents  list a case's documents
  *   POST /api/valuate              { subject, facts?, date?, caseId? } → ValuationResult
  *   GET  /api/parcel-at?lat&lng    nearest parcels (suggested block/parcel for an address)
+ *   GET  /api/parcel-lookup?city&street&number&lat&lng  block/parcel of an address (Over; else nearest)
  *   POST /api/cases/:caseId/adverts   Madlan/Yad2 print-to-PDF (multipart: file) → cards read
  *   GET  /api/cases/:caseId/adverts   the case's adverts and whether each is used
  *   POST /api/auth/code              { email, lang? } – send a sign-in code
@@ -59,6 +60,8 @@ import { startScheduler } from "./scheduler";
 import { listDocuments, storeDocument } from "./documents";
 import { caseListings, importAdvertPrint, listCaseAdverts } from "./caseAdverts";
 import { parcelsNear } from "./connectors/parcelsOpen";
+import { lookupParcel } from "./connectors/overParcel";
+import { OverApi } from "./connectors/over";
 import { captureLinkCase, newCaptureLink, revokeCaptureLinks } from "./cases";
 import { tourLayout, upgradeDossier, type Dossier } from "../src/dossier/schema";
 import { handleOps, onUserRegistered, opsTick } from "./ops/routes";
@@ -145,11 +148,45 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
    * submitted before requests existed or created another way.
    */
   const ACTIVE_CASES = ["submitted", "working", "prelim_review", "prelim_sent", "full_requested", "full_in_progress"];
+  /**
+   * Block/parcel of an address: Over's lookup by address, else by the map point; else the nearest
+   * parcel centre on our own map (approximate).
+   */
+  const overApi = new OverApi(overFetch);
+  const findParcel = async (q: { city?: string; street?: string; number?: string; lat?: number; lng?: number }) => {
+    const over = overOn() ? await lookupParcel(overApi, q).catch(() => null) : null;
+    if (over) return { ...over, source: over.method };
+    if (Number.isFinite(q.lat) && Number.isFinite(q.lng)) {
+      const near = parcelsNear(db, q.lat!, q.lng!)[0];
+      if (near) return { block: String(near.block), parcel: String(near.parcel), method: "nearest" as const, source: "nearest" as const, distanceM: near.distanceM };
+    }
+    return null;
+  };
+  /** A property without block/parcel gets them from its address (marked "suggested", i.e. not checked against the registry extract). */
+  const ensureCaseParcel = (caseId: string) => {
+    const c = getCase(db, caseId);
+    if (!c || c.subject.parcel?.block || !c.subject.address.city) return;
+    overQueue = overQueue.then(async () => {
+      const now = getCase(db, caseId);
+      if (!now || now.subject.parcel?.block) return;
+      const a = now.subject.address, L = now.dossier?.location;
+      const found = await findParcel({ city: a.city, street: a.street, number: a.number, lat: L?.pin?.lat ?? now.subject.location?.lat, lng: L?.pin?.lng ?? now.subject.location?.lng });
+      if (!found) return;
+      const after = getCase(db, caseId); // the owner may have typed one meanwhile
+      if (!after || after.subject.parcel?.block) return;
+      const parcel = { block: found.block, parcel: found.parcel, source: "suggested" as const };
+      const dossier = after.dossier ? { ...after.dossier, location: { ...after.dossier.location, parcel } } : undefined;
+      db.query(`UPDATE cases SET subject = ?, dossier = COALESCE(?, dossier) WHERE id = ?`)
+        .run(JSON.stringify({ ...after.subject, parcel }), dossier ? JSON.stringify(dossier) : null, caseId);
+      console.log("[parcel] filled from", found.source, caseId, `${found.block}/${found.parcel}`);
+    }).catch((e) => console.log("[parcel] lookup failed", caseId, (e as Error).message));
+  };
   const ensureCaseRequest = (caseId: string) => {
     try {
       ensureRequestTables(db);
       const c = getCase(db, caseId);
       if (!c || !ACTIVE_CASES.includes(c.status) || !c.subject.address.city) return;
+      ensureCaseParcel(caseId);
       const r = db.query(`SELECT id, over_status FROM requests WHERE case_id = ? ORDER BY created_at DESC LIMIT 1`).get(caseId) as { id: string; over_status: string | null } | null;
       if (!r) pullOver(createRequest(db, c.subject, undefined, caseId).id);
       else if (!r.over_status) pullOver(r.id);
@@ -223,6 +260,13 @@ export function createServer(opts: { dbPath?: string; adminToken?: string; port?
           const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) return json({ error: "lat and lng required" }, 400);
           return json(parcelsNear(db, lat, lng));
+        }
+
+        if (url.pathname === "/api/parcel-lookup" && req.method === "GET") {
+          const q = url.searchParams;
+          const lat = Number(q.get("lat")), lng = Number(q.get("lng"));
+          const found = await findParcel({ city: q.get("city") ?? undefined, street: q.get("street") ?? undefined, number: q.get("number") ?? undefined, lat, lng });
+          return json(found ?? null);
         }
 
         if (url.pathname === "/api/valuate" && req.method === "POST") {

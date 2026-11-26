@@ -23,6 +23,8 @@ export interface ParcelId {
   subParcel?: string; // תת-חלקה
   unsettled?: boolean; // מקרקעין לא מוסדרים
   unregistered?: boolean; // מקרקעין לא רשומים
+  /** Where block/parcel came from: looked up from the address/map ("suggested"), the owner, or a document. */
+  source?: "suggested" | "owner" | "document";
 }
 
 /** One level of an apartment, measured per Standard 9.1 (boundary-based polygon). */

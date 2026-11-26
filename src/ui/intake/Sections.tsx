@@ -4,7 +4,7 @@ import {
   DEVIATIONS, RESTRICTIONS, tourLayout, type AreaSource, type Dossier, type Maybe, type PropertyType, type Purpose, type Registry, type RightsKind, type Submitter,
 } from "../../dossier/schema";
 import type { Direction } from "../../engine/types";
-import { parcelAt, uploadDocument, type CaseDocDto } from "../../data/apiClient";
+import { parcelLookup, uploadDocument, type CaseDocDto } from "../../data/apiClient";
 import { AddressSearch } from "../AddressSearch";
 import { Block, Cards, Chips, Counter, NumberAsk, Q, TextAsk, UnsureButtons, YesNo } from "./controls";
 import { MapPin } from "./MapPin";
@@ -62,10 +62,12 @@ export function LocationSection({ d, up }: SectionProps) {
     up((x) => { x.location.pinConfirmed = true; if (!x.location.pin) x.location.pin = DEFAULT_PIN; });
     if (loc.parcel && loc.parcel.source !== "suggested") return;
     setLooking(true);
-    const near = await parcelAt((loc.pin ?? DEFAULT_PIN).lat, (loc.pin ?? DEFAULT_PIN).lng).catch(() => []);
+    const pin = loc.pin ?? DEFAULT_PIN;
+    const found = await parcelLookup({ city: loc.city, street: loc.street, number: loc.number, lat: pin.lat, lng: pin.lng }).catch(() => null);
     setLooking(false);
     up((x) => {
-      x.location.parcel = near[0] ? { block: String(near[0].block), parcel: String(near[0].parcel), source: "suggested" } : undefined;
+      if (x.location.parcel && x.location.parcel.source !== "suggested") return; // typed meanwhile
+      x.location.parcel = found ? { block: found.block, parcel: found.parcel, source: "suggested" } : undefined;
     });
   };
 
